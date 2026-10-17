@@ -197,6 +197,7 @@ export const buildSlideHtml = (input: SlideTemplateInput): string => {
 <style>
 :root { --background: ${background}; --foreground: ${foreground}; }
 * { box-sizing: border-box; }
+h1, p, span { overflow-wrap: anywhere; }
 html, body { margin: 0; padding: 0; }
 body { width: ${size.width}px; height: ${size.height}px; overflow: hidden; }
 .slide { position: relative; width: ${size.width}px; height: ${size.height}px; background: var(--background); color: var(--foreground); font-family: '${brand.bodyFont}', sans-serif; }
@@ -204,10 +205,10 @@ body { width: ${size.width}px; height: ${size.height}px; overflow: hidden; }
 .overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.78) 100%); }
 .content { position: relative; height: 100%; padding: ${padding}px; display: flex; flex-direction: column; justify-content: space-between; gap: ${Math.round(32 * scale)}px; }
 .top, .bottom { display: flex; align-items: center; justify-content: space-between; gap: ${Math.round(24 * scale)}px; font-size: ${Math.round(28 * scale)}px; font-weight: 700; }
-.kicker { text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
-.brand { display: flex; align-items: center; gap: ${Math.round(16 * scale)}px; }
+.kicker { min-width: 0; overflow-wrap: anywhere; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+.brand { flex-shrink: 0; display: flex; align-items: center; gap: ${Math.round(16 * scale)}px; }
 .logo { height: ${Math.round(56 * scale)}px; width: auto; }
-.text { display: flex; flex-direction: column; gap: ${Math.round(32 * scale)}px; margin-top: ${backgroundImage ? 'auto' : '0'}; }
+.text { min-width: 0; display: flex; flex-direction: column; gap: ${Math.round(32 * scale)}px; margin-top: ${backgroundImage ? 'auto' : '0'}; }
 h1 { margin: 0; font-family: '${brand.headingFont}', sans-serif; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; font-size: ${fonts.headline}px; }
 p { margin: 0; font-size: ${fonts.body}px; line-height: 1.4; font-weight: 500; opacity: 0.92; white-space: pre-line; }
 </style>
