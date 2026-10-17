@@ -188,4 +188,25 @@ describe('CreateCompositionDto', () => {
       )
     ).toEqual([]);
   });
+
+  it('limita o aninhamento das configurações do provider', async () => {
+    const nested = (levels: number): Record<string, unknown> =>
+      levels ? { level: nested(levels - 1) } : { value: 'x' };
+    expect(
+      await errorsOf(payload({ targets: [{ integrationId: 'ig-1', content: 'x', settings: nested(20) }] }))
+    ).toContain('targets.0.settings');
+    expect(
+      await errorsOf(
+        payload({
+          targets: [
+            {
+              integrationId: 'ig-1',
+              content: 'x',
+              settings: { tags: [{ value: 'a', label: 'b' }], nested: nested(3) },
+            },
+          ],
+        })
+      )
+    ).toEqual([]);
+  });
 });
