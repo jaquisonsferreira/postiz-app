@@ -1,6 +1,12 @@
 import { AppSession, API_URL, createChannel, FRONTEND_URL, openAppSession, prisma } from './app.session';
 
-const createComposition = async (auth: string, integrationId: string, headline: string, caption: string) => {
+const createComposition = async (
+  auth: string,
+  integrationId: string,
+  headline: string,
+  caption: string,
+  extraSlides = 0
+) => {
   const response = await fetch(`${API_URL}/compositions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', auth },
@@ -11,6 +17,10 @@ const createComposition = async (auth: string, integrationId: string, headline: 
       slides: [
         { kicker: 'Reforma Tributária', headline },
         { kicker: 'Ponto 01', headline: 'O cronograma', body: 'Entre 2026 e 2033.' },
+        ...Array.from({ length: extraSlides }, (_, index) => ({
+          kicker: `Ponto ${String(index + 2).padStart(2, '0')}`,
+          headline: `Detalhe ${index + 2}`,
+        })),
       ],
       targets: [{ integrationId, content: caption }],
     }),
@@ -34,12 +44,20 @@ describe('Aprovações', () => {
   let session: AppSession;
   let approveId = '';
   let rejectId = '';
+  let longId = '';
 
   beforeAll(async () => {
     session = await openAppSession();
     const channel = await createChannel(session.orgId, 'linkedin-page', 'Connectabil');
     approveId = await createComposition(session.auth, channel.id, 'Carrossel para aprovar', 'Legenda do carrossel aprovado');
     rejectId = await createComposition(session.auth, channel.id, 'Carrossel para rejeitar', 'Legenda rejeitada');
+    longId = await createComposition(
+      session.auth,
+      channel.id,
+      'Carrossel longo',
+      `Legenda longa ${'https://pauta.oriflow.io/'.repeat(12)} ${'palavra '.repeat(80)}`,
+      8
+    );
   });
 
   afterAll(async () => {
@@ -59,6 +77,36 @@ describe('Aprovações', () => {
     const detail = page.getByTestId('approval-detail');
     await detail.getByText('Legenda do carrossel aprovado').waitFor();
     expect(await detail.getByRole('img', { name: /Slide/ }).count()).toBe(2);
+  });
+
+  it('rola a lista de slides e quebra a legenda sem criar scroll lateral na página', async () => {
+    const { page } = session;
+    await page.goto(`${FRONTEND_URL}/approvals?id=${longId}`);
+    const detail = page.getByTestId('approval-detail');
+    await detail.getByText(/Legenda longa/).waitFor();
+    expect(await detail.getByRole('img', { name: /Slide/ }).count()).toBe(10);
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBe(0);
+
+    const slides = page.getByTestId('approval-slides');
+    const slidesScroll = await slides.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      overflowX: getComputedStyle(element).overflowX,
+    }));
+    expect(slidesScroll.overflowX).toBe('auto');
+    expect(slidesScroll.scrollWidth).toBeGreaterThan(slidesScroll.clientWidth);
+
+    const caption = detail.getByText(/Legenda longa/);
+    const captionBox = await caption.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    }));
+    expect(captionBox.scrollWidth).toBeLessThanOrEqual(captionBox.clientWidth);
+
+    await page.getByRole('button', { name: 'Aprovar e agendar', exact: true }).click();
+    await page.getByTestId('approval-queue').getByText('Carrossel longo').waitFor({ state: 'detached' });
   });
 
   it('aprova e agenda uma composição', async () => {
