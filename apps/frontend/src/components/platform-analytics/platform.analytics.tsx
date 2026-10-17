@@ -9,14 +9,14 @@ import SafeImage from '@gitroom/react/helpers/safe.image';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { RenderAnalytics } from '@gitroom/frontend/components/platform-analytics/render.analytics';
 import { Select } from '@gitroom/react/form/select';
-import { Button } from '@gitroom/react/form/button';
-import { useRouter } from 'next/navigation';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import useCookie from 'react-use-cookie';
 import { SVGLine } from '@gitroom/frontend/components/launches/launches.component';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
+import { Card } from '@gitroom/frontend/components/ui/card';
+import { PillLink } from '@gitroom/frontend/components/ui/pill.button';
 const allowedIntegrations = [
   'facebook',
   'instagram',
@@ -33,7 +33,6 @@ const allowedIntegrations = [
 export const PlatformAnalytics = () => {
   const fetch = useFetch();
   const t = useT();
-  const router = useRouter();
   const { disableXAnalytics } = useVariables();
 
   const [current, setCurrent] = useState(0);
@@ -140,50 +139,51 @@ export const PlatformAnalytics = () => {
 
   if (isLoading) {
     return (
-      <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col gap-[15px] transition-all items-center justify-center">
+      <Card className="flex-1 items-center justify-center">
         <LoadingComponent />
-      </div>
+      </Card>
     );
   }
 
   if (!sortedIntegrations.length && !isLoading) {
     return (
-      <div className="bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all flex-1 justify-center items-center text-center">
-        <div>
-          <img src="/peoplemarketplace.svg" />
-        </div>
-        <div className="text-[48px]">
+      <Card
+        testId="analytics-empty"
+        className="flex-1 justify-center items-center text-center"
+      >
+        <img src="/peoplemarketplace.svg" alt="" />
+        <h2 className="m-0 text-[28px] mobile:text-[22px] font-[500] tracking-[-0.02em]">
           {t('can_t_show_analytics_yet', "Can't show analytics yet")}
           <br />
           {t(
             'you_have_to_add_social_media_channels',
             'You have to add Social Media channels'
           )}
-        </div>
-        <div className="text-[20px]">
-          {t('supported', 'Supported:')}
+        </h2>
+        <p className="m-0 text-[16px] text-textItemBlur">
+          {t('supported', 'Supported:')}{' '}
           {allowedIntegrations.map((p) => capitalize(p)).join(', ')}
-        </div>
-        <Button onClick={() => router.push('/launches')}>
-          {t(
-            'go_to_the_calendar_to_add_channels',
-            'Go to the calendar to add channels'
-          )}
-        </Button>
-      </div>
+        </p>
+        <PillLink href="/accounts" variant="primary">
+          {t('connect_channel', 'Connect a channel')}
+        </PillLink>
+      </Card>
     );
   }
   return (
-    <>
-      <div
+    <div className="flex-1 min-w-0 flex gap-[20px] mobile:flex-col">
+      <Card
+        testId="analytics-channels"
         className={clsx(
-          'bg-newBgColorInner p-[20px] mobile:p-[12px] flex flex-col gap-[15px] transition-all mobile:w-full',
-          collapseMenu === '1' ? 'group sidebar w-[100px]' : 'w-[260px]'
+          'shrink-0 transition-all mobile:w-full',
+          collapseMenu === '1'
+            ? 'group sidebar w-[100px] !px-[20px]'
+            : 'w-[280px]'
         )}
       >
         <div className="flex gap-[12px] flex-col">
           <div className="flex items-center mobile:hidden">
-            <h2 className="group-[.sidebar]:hidden flex-1 text-[20px] font-[500]">
+            <h2 className="group-[.sidebar]:hidden flex-1 m-0 text-[19px] font-[500]">
               {t('channels')}
             </h2>
             <div
@@ -277,8 +277,8 @@ export const PlatformAnalytics = () => {
             ))}
           </div>
         </div>
-      </div>
-      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] mobile:p-[12px] gap-[12px]">
+      </Card>
+      <Card testId="analytics-content" className="flex-1 min-w-0">
         {!!options.length && (
           <div className="flex-1 flex flex-col gap-[14px]">
             <div className="max-w-[200px]">
@@ -303,7 +303,7 @@ export const PlatformAnalytics = () => {
             </div>
           </div>
         )}
-      </div>
-    </>
+      </Card>
+    </div>
   );
 };

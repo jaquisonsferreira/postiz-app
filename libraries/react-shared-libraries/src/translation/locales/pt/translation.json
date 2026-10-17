@@ -1309,5 +1309,6 @@
   "cli_step_install": "Instale a CLI",
   "cli_step_login": "Execute: postiz auth:login",
   "cli_step_install_skill": "Instale a skill do Postiz no seu agente de IA",
-  "cli_step_set_api_key": "Defina sua chave de API como variável de ambiente"
+  "cli_step_set_api_key": "Defina sua chave de API como variável de ambiente",
+  "settings_sections": "Seções das configurações"
 }
