@@ -59,7 +59,7 @@ describe('GoogleAdsProvider', () => {
     expect(parsed.searchParams.get('prompt')).toBe('consent');
     expect(parsed.searchParams.get('response_type')).toBe('code');
     expect(parsed.searchParams.get('redirect_uri')).toBe(
-      'https://pauta.example/integrations/ads/google-ads'
+      'https://pauta.example/ads/connect/google-ads'
     );
     expect(parsed.searchParams.get('state')).toBe(state);
   });
@@ -78,7 +78,7 @@ describe('GoogleAdsProvider', () => {
     expect(body.get('grant_type')).toBe('authorization_code');
     expect(body.get('code')).toBe('the-code');
     expect(body.get('redirect_uri')).toBe(
-      'https://pauta.example/integrations/ads/google-ads'
+      'https://pauta.example/ads/connect/google-ads'
     );
     expect(tokens).toEqual({
       accessToken: 'access',

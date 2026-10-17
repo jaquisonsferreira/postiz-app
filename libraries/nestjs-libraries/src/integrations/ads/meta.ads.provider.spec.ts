@@ -50,7 +50,7 @@ describe('MetaAdsProvider', () => {
     expect(parsed.searchParams.get('client_id')).toBe('app-id');
     expect(parsed.searchParams.get('scope')).toBe('ads_read,business_management');
     expect(parsed.searchParams.get('redirect_uri')).toBe(
-      'https://pauta.example/integrations/ads/meta-ads'
+      'https://pauta.example/ads/connect/meta-ads'
     );
     expect(parsed.searchParams.get('state')).toBe(state);
     expect(state.length).toBeGreaterThan(5);
@@ -66,7 +66,7 @@ describe('MetaAdsProvider', () => {
 
     expect(requestedUrl(spy, 0).searchParams.get('code')).toBe('the-code');
     expect(requestedUrl(spy, 0).searchParams.get('redirect_uri')).toBe(
-      'https://pauta.example/integrations/ads/meta-ads'
+      'https://pauta.example/ads/connect/meta-ads'
     );
     expect(requestedUrl(spy, 1).searchParams.get('grant_type')).toBe(
       'fb_exchange_token'
