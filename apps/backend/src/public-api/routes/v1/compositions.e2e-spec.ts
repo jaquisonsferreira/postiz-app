@@ -176,6 +176,38 @@ describe('Composições pela API pública', () => {
     expect(Array.isArray(json)).toBe(true);
   });
 
+  it('trata página não finita na listagem como a primeira', async () => {
+    const { status } = await api('GET', '/compositions?page=Infinity', apiKey);
+    expect(status).toBe(200);
+  });
+
+  it('recusa aprovar quando um rascunho foi apagado no painel', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [
+        { integrationId: linkedinId, content: 'Canal mantido' },
+        { integrationId: xId, content: 'Canal apagado', settings: { who_can_reply_post: 'everyone' } },
+      ],
+    });
+    const { id } = created.json as { id: string };
+    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const removed = ready.posts.find((p) => p.integration === xId)!;
+    await prisma.post.update({ where: { id: removed.postId }, data: { deletedAt: new Date() } });
+
+    const approved = await api('POST', `/compositions/${id}/approve`, apiKey);
+    expect(approved.status).toBe(400);
+    expect(JSON.stringify(approved.json)).toContain(xId);
+    const kept = ready.posts.find((p) => p.integration === linkedinId)!;
+    expect((await prisma.post.findUniqueOrThrow({ where: { id: kept.postId } })).state).toBe('DRAFT');
+    expect((await api('GET', `/compositions/${id}`, apiKey)).json).toMatchObject({
+      status: 'awaiting_approval',
+    });
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+  });
+
   it('aceita payload grande dentro dos limites do DTO', async () => {
     const created = await api('POST', '/compositions', apiKey, {
       date: future,
