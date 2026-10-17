@@ -146,4 +146,8 @@ describe('CreateCompositionDto', () => {
       await errorsOf(payload({ slides: [{ ...slide(1), background: [] }, slide(2)] }))
     ).toContain('slides.0.background');
   });
+
+  it('exige que cada slide seja um objeto', async () => {
+    expect(await errorsOf(payload({ slides: [[], []] }))).toContain('slides');
+  });
 });
