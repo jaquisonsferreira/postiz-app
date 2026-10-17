@@ -3,6 +3,7 @@
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import {
   cookieName,
+  displayLocales,
   fallbackLng,
   languages,
 } from '@gitroom/react/translation/i18n.config';
@@ -82,10 +83,11 @@ export const ChangeLanguageComponent = () => {
   const getLanguageName = useCallback((code: string) => {
     try {
       // Use browser's Intl API to get language name in native script
-      const displayNames = new Intl.DisplayNames([code], {
+      const locale = displayLocales[code] || code;
+      const displayNames = new Intl.DisplayNames([locale], {
         type: 'language',
       });
-      return displayNames.of(code);
+      return displayNames.of(locale);
     } catch (error) {
       // Fallback to language code if the API isn't supported or language is not found
       return code;

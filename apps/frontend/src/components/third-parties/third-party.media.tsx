@@ -59,6 +59,7 @@ export const ThirdPartyPopup: FC<{
   }[];
 }> = (props) => {
   const { closeModal, thirdParties, allData, onChange } = props;
+  const t = useT();
   const [thirdParty, setThirdParty] = useState<any>(null);
   const refNew = useRef(null);
 
@@ -117,7 +118,7 @@ export const ThirdPartyPopup: FC<{
                 {p.description}
               </div>
               <div className="w-full flex">
-                <Button className="w-full">Use</Button>
+                <Button className="w-full">{t('use', 'Use')}</Button>
               </div>
             </div>
           ))}
