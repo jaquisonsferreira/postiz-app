@@ -187,8 +187,9 @@ export class CreateCompositionDto {
   @Validate(SlidesMatchFormat)
   @ValidateIf(
     (o: CreateCompositionDto) =>
-      Array.isArray(o.slides) || (SLIDES_PER_FORMAT[o.format]?.[0] ?? 0) > 0
+      o.slides !== undefined || (SLIDES_PER_FORMAT[o.format]?.[0] ?? 0) > 0
   )
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CompositionSlideDto)
   slides?: CompositionSlideDto[];

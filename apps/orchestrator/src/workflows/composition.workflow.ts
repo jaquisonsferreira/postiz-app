@@ -20,8 +20,22 @@ const { renderComposition } = proxyActivities<CompositionActivity>({
   },
 });
 
-// Scheduling upserts the same post ids on every attempt, so it is safe to retry
-const { scheduleComposition, failComposition } = proxyActivities<CompositionActivity>({
+// Scheduling saves each post on the composition as soon as it exists, so a
+// retry continues where it stopped. The heartbeat stops a worker that is still
+// running a timed-out attempt from going unnoticed for the whole timeout
+const { scheduleComposition } = proxyActivities<CompositionActivity>({
+  startToCloseTimeout: '5 minute',
+  heartbeatTimeout: '1 minute',
+  taskQueue: 'main',
+  retry: {
+    maximumAttempts: 5,
+    backoffCoefficient: 2,
+    initialInterval: '10 seconds',
+    maximumInterval: '2 minutes',
+  },
+});
+
+const { failComposition } = proxyActivities<CompositionActivity>({
   startToCloseTimeout: '2 minute',
   taskQueue: 'main',
   retry: {

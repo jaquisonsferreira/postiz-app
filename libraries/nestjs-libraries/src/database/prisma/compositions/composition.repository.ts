@@ -97,8 +97,8 @@ export class CompositionRepository {
     });
   }
 
-  // A deleted composition is never written again, so an activity that was
-  // still running when it was deleted learns it from the count
+  // A deleted or failed composition is never written again, so an activity
+  // that was still running (deleted, or timed out and failed) learns it from the count
   updateComposition(
     id: string,
     data: {
@@ -112,8 +112,24 @@ export class CompositionRepository {
       where: {
         id,
         deletedAt: null,
+        status: {
+          not: 'failed',
+        },
       },
       data,
+    });
+  }
+
+  markFailed(id: string, error: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+      },
+      data: {
+        status: 'failed',
+        error,
+      },
     });
   }
 

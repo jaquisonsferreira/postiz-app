@@ -38,7 +38,9 @@ export class CompositionActivity {
 
   @ActivityMethod()
   async scheduleComposition({ compositionId }: { compositionId: string }) {
-    await stopOnValidation(() => this._compositionService.schedule(compositionId));
+    await withHeartbeat(() =>
+      stopOnValidation(() => this._compositionService.schedule(compositionId))
+    );
   }
 
   @ActivityMethod()

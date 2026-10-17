@@ -13,7 +13,7 @@ import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/s
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
-import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ChromiumSlideRenderer } from '@gitroom/nestjs-libraries/compositions/chromium.slide.renderer';
 import {
@@ -35,6 +35,7 @@ export type CompositionStatus =
   | 'scheduling'
   | 'awaiting_approval'
   | 'approving'
+  | 'queueing'
   | 'scheduled'
   | 'failed';
 
@@ -145,7 +146,8 @@ export class CompositionService {
       await this.mapPosts(org.id, {
         compositionId: 'validation',
         date: body.date,
-        requiresApproval: !!body.requiresApproval,
+        // drafts skip the provider settings, and every post is scheduled in the end
+        requiresApproval: false,
         targets: await this.resolveTargets(org.id, body.targets),
         media: [],
         tags: body.tags,
@@ -202,7 +204,8 @@ export class CompositionService {
   }
 
   async getCompositions(org: string, page: number) {
-    return (await this._compositionRepository.getCompositions(org, page || 0)).map((c) =>
+    const safePage = Math.max(0, Math.floor(Number(page) || 0));
+    return (await this._compositionRepository.getCompositions(org, safePage)).map((c) =>
       this.present(c)
     );
   }
@@ -280,14 +283,14 @@ export class CompositionService {
   private async remoteImage(url: string): Promise<string> {
     // the dispatcher pins what DNS answers, but Node never asks DNS for an
     // address written as an IP, so the address itself is checked first
-    if (!(await isSafePublicHttpsUrl(url))) {
+    if (process.env.DISABLE_SSRF_PROTECTION !== 'true' && !(await isSafePublicHttpsUrl(url))) {
       throw new CompositionValidationError(`Could not download ${url}: blocked address`);
     }
     let response: globalThis.Response;
     try {
       response = await fetch(url, {
         // @ts-ignore — undici option, not in lib.dom fetch types
-        dispatcher: ssrfSafeDispatcher,
+        dispatcher: getSsrfSafeDispatcher(),
         signal: AbortSignal.timeout(REMOTE_IMAGE_TIMEOUT_MS),
       });
     } catch (err: unknown) {
@@ -438,7 +441,13 @@ export class CompositionService {
 
   // changePostStatus queues the first post and starts its workflow; the rest of
   // a thread is published from it, so its posts only follow the state
+  // Only a draft is queued: a retry that runs after the post was published must
+  // not put it back in the queue and publish it a second time
   private async queuePost(organizationId: string, postId: string) {
+    const post = await this._postsService.getPostById(postId, organizationId);
+    if (!post || post.deletedAt || post.state !== 'DRAFT') {
+      return;
+    }
     await this._postsService.changePostStatus(organizationId, postId, 'schedule');
     const [, ...thread] = await this._postsService.getPostsRecursively(
       postId,
@@ -460,6 +469,14 @@ export class CompositionService {
     requiresApproval: boolean,
     posts: CompositionPost[]
   ) {
+    // claimed first: an attempt that timed out and was failed meanwhile finds
+    // the composition failed here and queues nothing
+    const claimed = await this._compositionRepository.updateComposition(id, {
+      status: 'queueing',
+    });
+    if (!claimed.count) {
+      throw new CompositionValidationError('The composition failed or was deleted');
+    }
     if (!requiresApproval) {
       for (const post of posts) {
         await this.queuePost(organizationId, post.postId);
@@ -531,10 +548,10 @@ export class CompositionService {
       const written = await this._compositionRepository.updateComposition(id, {
         posts: JSON.stringify(posts),
       });
-      // deleted while the post was being created: it must not be published
+      // deleted or failed while the post was being created: it must not stay
       if (!written.count) {
         await this.deletePosts(composition.organizationId, [created.postId]);
-        throw new CompositionValidationError('The composition was deleted');
+        throw new CompositionValidationError('The composition failed or was deleted');
       }
     }
 
@@ -553,10 +570,7 @@ export class CompositionService {
     if (!composition) {
       return;
     }
-    await this._compositionRepository.updateComposition(id, {
-      status: 'failed',
-      error,
-    });
+    await this._compositionRepository.markFailed(id, error);
     await this.deletePosts(
       composition.organizationId,
       parseList<CompositionPost>(composition.posts).map((post) => post.postId)
