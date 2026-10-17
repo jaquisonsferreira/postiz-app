@@ -61,7 +61,7 @@ const ProviderIcon: FC<{ provider: string; size?: number }> = ({ provider, size 
 const Kpi: FC<{ label: string; value: string; hint: string }> = ({ label, value, hint }) => (
   <div data-testid="ads-kpi" className="flex-1 min-w-[180px] bg-newBgColorInner rounded-[32px] p-[26px] flex flex-col gap-[6px]">
     <span className="text-[15px] text-textItemBlur">{label}</span>
-    <span data-testid="ads-kpi-value" className="text-[36px] leading-[1.1] font-[500] tracking-[-0.02em] break-words">
+    <span data-testid="ads-kpi-value" className="text-[32px] leading-[1.1] font-[500] tracking-[-0.02em] whitespace-nowrap">
       {value}
     </span>
     <span className="text-[14px] text-textItemBlur">{hint}</span>
@@ -151,6 +151,7 @@ const AccountsCard: FC<{ accounts: AdAccount[]; providers: AdsProviderOption[] }
         !(await deleteDialog(
           t('ads_remove_account_question', 'Remove {{name}}? Its campaigns stop showing here, nothing changes on the platform.', {
             name: account.name,
+            interpolation: { escapeValue: false },
           })
         ))
       ) {
@@ -178,7 +179,10 @@ const AccountsCard: FC<{ accounts: AdAccount[]; providers: AdsProviderOption[] }
                 {providers.find((provider) => provider.identifier === account.provider)?.name || account.provider} ·{' '}
                 {account.currency} ·{' '}
                 {account.lastSyncAt
-                  ? t('ads_synced_at', 'Synced {{when}}', { when: date(account.lastSyncAt).format('DD/MM HH:mm') })
+                  ? t('ads_synced_at', 'Synced {{when}}', {
+                      when: date(account.lastSyncAt).format('DD/MM HH:mm'),
+                      interpolation: { escapeValue: false },
+                    })
                   : t('ads_never_synced', 'Not synced yet')}
               </span>
               {account.refreshNeeded && (
