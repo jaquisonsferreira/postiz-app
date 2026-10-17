@@ -344,6 +344,7 @@ model Composition {
   media            String?
   posts            String?
   error            String?
+  schedulingLease  String?
   deletedAt        DateTime?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt

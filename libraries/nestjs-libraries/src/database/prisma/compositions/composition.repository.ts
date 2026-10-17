@@ -14,6 +14,8 @@ const PUBLIC_FIELDS = {
   updatedAt: true,
 } as const;
 
+const SCHEDULING_LEASE_MS = 2 * 60 * 1000;
+
 @Injectable()
 export class CompositionRepository {
   constructor(private _composition: PrismaRepository<'composition'>) {}
@@ -124,30 +126,51 @@ export class CompositionRepository {
     });
   }
 
-  // Scheduling starts only before it finished: an attempt that resumes after
-  // another one scheduled the composition claims nothing
-  claimScheduling(id: string) {
+  // One scheduling attempt at a time: the lease is taken before scheduling
+  // starts, or from an attempt that has been silent for two minutes, so a
+  // retry that starts while a timed-out attempt is still running waits for it
+  claimScheduling(id: string, lease: string) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
         deletedAt: null,
-        status: {
-          in: ['pending', 'rendering', 'scheduling'],
-        },
+        OR: [
+          { status: { in: ['pending', 'rendering'] } },
+          { status: 'scheduling', updatedAt: { lt: new Date(Date.now() - SCHEDULING_LEASE_MS) } },
+        ],
       },
       data: {
         status: 'scheduling',
+        schedulingLease: lease,
       },
     });
   }
 
-  // Written only over the list this attempt started from, while scheduling
-  savePosts(id: string, previous: string | null, posts: string) {
+  // Renews the lease before a channel is touched, and confirms that no other
+  // attempt saved a post since this one last read the list
+  holdScheduling(id: string, lease: string, previous: string | null) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
         deletedAt: null,
         status: 'scheduling',
+        schedulingLease: lease,
+        posts: previous,
+      },
+      data: {
+        schedulingLease: lease,
+      },
+    });
+  }
+
+  // Written only by the lease holder, over the list it started from
+  savePosts(id: string, lease: string, previous: string | null, posts: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: 'scheduling',
+        schedulingLease: lease,
         posts: previous,
       },
       data: {

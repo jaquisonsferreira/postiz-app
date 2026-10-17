@@ -1,5 +1,6 @@
 import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
 import { Organization } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import { TypedSearchAttributes } from '@temporalio/common';
 import { TemporalService } from 'nestjs-temporal-core';
 import sharp from 'sharp';
@@ -637,7 +638,12 @@ export class CompositionService {
       return composition.posts;
     }
 
-    if (!(await this._compositionRepository.claimScheduling(id)).count) {
+    const lease = randomUUID();
+    if (!(await this._compositionRepository.claimScheduling(id, lease)).count) {
+      const current = await this._compositionRepository.getCompositionById(id);
+      if (current?.status === 'scheduling') {
+        throw new Error(`Composition ${id} is being scheduled by another attempt`);
+      }
       return composition.posts;
     }
     const body = await this.mapPosts(composition.organizationId, {
@@ -652,17 +658,15 @@ export class CompositionService {
     await this.assertValid(composition.organizationId, body.posts);
 
     // One channel at a time, each post saved on the record as soon as it
-    // exists, so a retry skips the channels already saved. Another attempt that
-    // saved a post meanwhile changes the stored list: this one stops before
-    // touching that channel and the retry continues from the list as it is now
+    // exists, so a retry skips the channels already saved. The lease is renewed
+    // before each channel: an attempt that lost it stops before touching one
     const posts = [...composition.posts];
     let previous = composition.storedPosts;
     for (const [target, post] of body.posts.entries()) {
       if (posts.some((saved) => saved.target === target)) {
         continue;
       }
-      const current = await this._compositionRepository.getCompositionById(id);
-      if (!current || current.status !== 'scheduling' || current.posts !== previous) {
+      if (!(await this._compositionRepository.holdScheduling(id, lease, previous)).count) {
         throw new Error(`Composition ${id} was changed by another attempt`);
       }
       // a post an earlier attempt created without saving it is a draft in this
@@ -677,9 +681,14 @@ export class CompositionService {
       posts.push({ ...created, target });
 
       const next = JSON.stringify(posts);
-      const written = await this._compositionRepository.savePosts(id, previous, next);
+      const written = await this._compositionRepository.savePosts(id, lease, previous, next);
       if (!written.count) {
-        await this.deletePosts(composition.organizationId, [created.postId]);
+        // the lease moved to another attempt while this post was created, so
+        // the channel's group may already hold that attempt's saved post: the
+        // draft is left in the group, which the composition's deletion removes
+        this._logger.warn(
+          `Composition ${id} lost its scheduling lease, draft ${created.postId} was left unsaved`
+        );
         throw new Error(`Composition ${id} was changed by another attempt`);
       }
       previous = next;
