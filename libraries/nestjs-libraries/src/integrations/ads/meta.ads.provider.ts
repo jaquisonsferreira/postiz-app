@@ -96,7 +96,7 @@ export class MetaAdsProvider implements AdsProvider {
   }
 
   private redirectUri() {
-    return `${process.env.FRONTEND_URL}/integrations/ads/${this.identifier}`;
+    return `${process.env.FRONTEND_URL}/ads/connect/${this.identifier}`;
   }
 
   async generateAuthUrl() {
