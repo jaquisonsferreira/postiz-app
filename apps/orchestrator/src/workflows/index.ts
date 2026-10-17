@@ -20,3 +20,4 @@ export * from './generate.video.workflow';
 export * from './process.media.workflow';
 export * from './clipping.workflow';
 export * from './composition.workflow';
+export * from './ads.sync.workflow';
