@@ -39,4 +39,9 @@ describe('Layout do Pauta', () => {
     await badge.waitFor();
     expect(await badge.textContent()).toBe('1');
   });
+  it('abre o app pelo dashboard', async () => {
+    const { page } = session;
+    await page.goto(`${FRONTEND_URL}/`);
+    await page.waitForURL(`${FRONTEND_URL}/dashboard`);
+  });
 });
