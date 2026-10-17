@@ -110,6 +110,7 @@ describe('Anúncios', () => {
 
     const account = page.getByTestId('ads-account');
     expect(await account.textContent()).toContain('Loja da Pauta');
+    expect(await account.textContent()).toMatch(/Sincronizada em \d{2}\/\d{2} \d{2}:\d{2}/);
     await account.getByRole('button', { name: 'Remover' }).click();
     await page.getByRole('button', { name: 'Sim, exclua!' }).click();
 
