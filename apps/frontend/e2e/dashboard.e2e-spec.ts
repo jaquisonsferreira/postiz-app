@@ -51,7 +51,7 @@ describe('Dashboard', () => {
     expect(await kpi('Aguardando aprovação').textContent()).toBe('1');
     expect(await kpi('Canais conectados').textContent()).toBe('1');
 
-    await page.getByRole('button', { name: '30 dias' }).click();
+    await page.getByRole('tab', { name: '30 dias' }).click();
     await page.waitForURL(/period=30d/);
     await page.waitForFunction(
       () => document.querySelector('[data-testid="kpi"] [data-testid="kpi-value"]')?.textContent === '2'
