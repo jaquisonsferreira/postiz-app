@@ -148,6 +148,17 @@ describe('Composições pela API pública', () => {
     expect(status).toBe(400);
   });
 
+  it('recusa na hora configurações inválidas do provider com a mensagem do campo', async () => {
+    const { status, json } = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      targets: [{ integrationId: xId, content: 'Sem configuração de respostas' }],
+    });
+    expect(status).toBe(400);
+    expect(JSON.stringify(json)).toContain('who_can_reply_post');
+    expect(await prisma.composition.count({ where: { organizationId: orgId } })).toBe(0);
+  });
+
   it('cria, aprova e exclui um carrossel', async () => {
     const created = await api('POST', '/compositions', apiKey, {
       date: future,
@@ -214,7 +225,14 @@ describe('Composições pela API pública', () => {
     const created = await api('POST', '/compositions', apiKey, {
       date: future,
       format: 'text',
-      targets: [{ integrationId: xId, content: 'Fio 1/2', comments: ['Fio 2/2'] }],
+      targets: [
+        {
+          integrationId: xId,
+          content: 'Fio 1/2',
+          comments: ['Fio 2/2'],
+          settings: { who_can_reply_post: 'everyone' },
+        },
+      ],
     });
     expect(created.status).toBe(201);
     const { id } = created.json as { id: string };
