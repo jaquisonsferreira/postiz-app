@@ -1,6 +1,7 @@
 import {
   buildCompositionPosts,
   captionToHtml,
+  compositionPostIds,
   CompositionPostsInput,
 } from '@gitroom/nestjs-libraries/compositions/composition.posts.builder';
 import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositions/composition.errors';
@@ -149,5 +150,13 @@ describe('buildCompositionPosts', () => {
     expect(() => buildCompositionPosts(input({ targets: [] }))).toThrow(
       CompositionValidationError
     );
+  });
+});
+
+describe('compositionPostIds', () => {
+  it('calcula os ids dos posts principais de cada canal sem depender do que foi gravado', () => {
+    const body = buildCompositionPosts(input());
+
+    expect(compositionPostIds('cmp1', 2)).toEqual(body.posts.map((p) => p.value[0].id));
   });
 });
