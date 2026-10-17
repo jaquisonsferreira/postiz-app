@@ -191,6 +191,7 @@ export class CreateCompositionDto {
       o.slides !== undefined || (SLIDES_PER_FORMAT[o.format]?.[0] ?? 0) > 0
   )
   @IsArray()
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => CompositionSlideDto)
   slides?: CompositionSlideDto[];

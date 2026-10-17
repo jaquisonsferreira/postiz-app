@@ -107,6 +107,38 @@ export class CompositionRepository {
     });
   }
 
+  // Scheduling starts only before it finished: an attempt that resumes after
+  // another one scheduled the composition claims nothing
+  claimScheduling(id: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: {
+          in: ['pending', 'rendering', 'scheduling'],
+        },
+      },
+      data: {
+        status: 'scheduling',
+      },
+    });
+  }
+
+  // Written only over the list this attempt started from, while scheduling
+  savePosts(id: string, previous: string | null, posts: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: 'scheduling',
+        posts: previous,
+      },
+      data: {
+        posts,
+      },
+    });
+  }
+
   // Finishing starts only from a processing state: an attempt that timed out
   // and resumes after a retry finished (or after the approval) claims nothing
   claimQueueing(id: string) {

@@ -345,6 +345,7 @@ export class CompositionService {
     return {
       ...composition,
       storedMedia: composition.media,
+      storedPosts: composition.posts,
       body: JSON.parse(composition.payload) as CreateCompositionDto,
       media: parseList<CompositionMedia>(composition.media),
       posts: parseList<CompositionPost>(composition.posts),
@@ -631,7 +632,9 @@ export class CompositionService {
       return composition.posts;
     }
 
-    await this._compositionRepository.updateComposition(id, { status: 'scheduling' });
+    if (!(await this._compositionRepository.claimScheduling(id)).count) {
+      return composition.posts;
+    }
     const body = await this.mapPosts(composition.organizationId, {
       compositionId: id,
       date: composition.body.date,
@@ -644,11 +647,18 @@ export class CompositionService {
     await this.assertValid(composition.organizationId, body.posts);
 
     // One channel at a time, each post saved on the record as soon as it
-    // exists, so a retry skips the channels already saved
+    // exists, so a retry skips the channels already saved. Another attempt that
+    // saved a post meanwhile changes the stored list: this one stops before
+    // touching that channel and the retry continues from the list as it is now
     const posts = [...composition.posts];
+    let previous = composition.storedPosts;
     for (const [target, post] of body.posts.entries()) {
       if (posts.some((saved) => saved.target === target)) {
         continue;
+      }
+      const current = await this._compositionRepository.getCompositionById(id);
+      if (!current || current.status !== 'scheduling' || current.posts !== previous) {
+        throw new Error(`Composition ${id} was changed by another attempt`);
       }
       // a post an earlier attempt created without saving it is a draft in this
       // channel's group: it is removed so the retry leaves a single post
@@ -661,14 +671,13 @@ export class CompositionService {
       )) as Omit<CompositionPost, 'target'>[];
       posts.push({ ...created, target });
 
-      const written = await this._compositionRepository.updateComposition(id, {
-        posts: JSON.stringify(posts),
-      });
-      // deleted or failed while the post was being created: it must not stay
+      const next = JSON.stringify(posts);
+      const written = await this._compositionRepository.savePosts(id, previous, next);
       if (!written.count) {
         await this.deletePosts(composition.organizationId, [created.postId]);
-        throw new CompositionValidationError('The composition failed or was deleted');
+        throw new Error(`Composition ${id} was changed by another attempt`);
       }
+      previous = next;
     }
 
     await this.finishScheduling(
