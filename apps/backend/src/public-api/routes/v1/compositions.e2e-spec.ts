@@ -524,4 +524,64 @@ describe('Composições pela API pública', () => {
     expect((await compositions.finishQueueing(id, 'primeira', 'scheduled')).count).toBe(0);
     expect((await compositions.finishQueueing(id, 'segunda', 'scheduled')).count).toBe(1);
   });
+  it('recusa aprovar quando o canal foi desativado durante a espera', async () => {
+    const channel = await createIntegration(orgId, 'linkedin-page');
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [{ integrationId: channel.id, content: 'Canal desativado' }],
+    });
+    const { id } = created.json as { id: string };
+    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    await prisma.integration.update({ where: { id: channel.id }, data: { disabled: true } });
+
+    const approved = await api('POST', `/compositions/${id}/approve`, apiKey);
+    expect(approved.status).toBe(400);
+    expect(
+      (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).state
+    ).toBe('DRAFT');
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+  });
+
+  it('descarta campos fora do contrato antes de guardar a composição', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      junk: 'x'.repeat(1000),
+      targets: [{ integrationId: linkedinId, content: 'Sem lixo', extra: 'y' }],
+    });
+    const { id } = created.json as { id: string };
+    const stored = await prisma.composition.findUniqueOrThrow({ where: { id } });
+
+    expect(stored.payload).not.toContain('junk');
+    expect(stored.payload).not.toContain('extra');
+
+    await waitForStatus(apiKey, id, ['awaiting_approval']);
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+  });
+
+  it('renova a reserva do enfileiramento só para quem a detém', async () => {
+    const { id } = await prisma.composition.create({
+      data: {
+        organizationId: orgId,
+        status: 'scheduling',
+        format: 'text',
+        publishDate: new Date(future),
+        payload: '{}',
+      },
+      select: { id: true },
+    });
+    expect((await compositions.claimQueueing(id, 'primeira')).count).toBe(1);
+    await prisma.composition.update({
+      where: { id },
+      data: { updatedAt: new Date(Date.now() - 3 * 60 * 1000) },
+    });
+
+    expect((await compositions.holdQueueing(id, 'segunda')).count).toBe(0);
+    expect((await compositions.holdQueueing(id, 'primeira')).count).toBe(1);
+    expect((await compositions.claimQueueing(id, 'segunda')).count).toBe(0);
+  });
 });
