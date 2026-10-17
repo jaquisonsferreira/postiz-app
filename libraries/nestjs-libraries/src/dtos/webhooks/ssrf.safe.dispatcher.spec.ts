@@ -58,6 +58,7 @@ const BLOCKED_IP_URLS = [
   'https://169.254.169.254/latest/meta-data',
   'https://10.0.0.5/',
   'http://[::1]/',
+  'http://[::ffff:127.0.0.1]/',
 ];
 
 describe('ssrf.safe.dispatcher', () => {
