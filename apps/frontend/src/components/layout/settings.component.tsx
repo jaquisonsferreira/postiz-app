@@ -134,7 +134,6 @@ export const SettingsPopup: FC<{
         <div
           role="tablist"
           aria-label={t('settings_sections', 'Settings sections')}
-          aria-orientation="vertical"
           className="flex flex-col gap-[4px] mobile:flex-row mobile:overflow-x-auto"
         >
           {list.map(({ tab: tabKey, label }) => (
@@ -167,12 +166,7 @@ export const SettingsPopup: FC<{
             {!!getRef && (
               <button type="submit" className="hidden" ref={getRef}></button>
             )}
-            <div
-              className={clsx(
-                'w-full mx-auto gap-[24px] flex flex-col relative',
-                !getRef && 'rounded-[4px]'
-              )}
-            >
+            <div className="w-full mx-auto gap-[24px] flex flex-col relative">
               {tab === 'global_settings' && (
                 <div>
                   <GlobalSettings />
