@@ -403,4 +403,53 @@ describe('Composições pela API pública', () => {
     expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
     expect((await prisma.post.findUniqueOrThrow({ where: { id: orphan.id } })).deletedAt).not.toBeNull();
   });
+
+  it('trata página enorme na listagem sem erro', async () => {
+    const { status } = await api('GET', '/compositions?page=1e308', apiKey);
+    expect(status).toBe(200);
+  });
+
+  it('exclui o rascunho mesmo depois de editado no painel', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [{ integrationId: linkedinId, content: 'Será editado' }],
+    });
+    const { id } = created.json as { id: string };
+    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    await prisma.post.update({
+      where: { id: ready.posts[0].postId },
+      data: { group: randomUUID() },
+    });
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(
+      (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).deletedAt
+    ).not.toBeNull();
+  });
+
+  it('revalida o rascunho editado no painel antes de aprovar', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [{ integrationId: linkedinId, content: 'Curto' }],
+    });
+    const { id } = created.json as { id: string };
+    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    await prisma.post.update({
+      where: { id: ready.posts[0].postId },
+      data: { content: `<p>${'x'.repeat(4000)}</p>` },
+    });
+
+    const approved = await api('POST', `/compositions/${id}/approve`, apiKey);
+    expect(approved.status).toBe(400);
+    expect(JSON.stringify(approved.json)).toContain('3000');
+    expect(
+      (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).state
+    ).toBe('DRAFT');
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+  });
 });

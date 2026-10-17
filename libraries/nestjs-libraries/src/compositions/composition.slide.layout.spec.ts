@@ -37,7 +37,13 @@ describe('layout do slide', () => {
       route.request().url().startsWith('data:') ? route.continue() : route.abort()
     );
     await page.setContent(
-      buildSlideHtml({ slide: longest, index: 1, total: 5, size, brand: DEFAULT_BRAND }),
+      buildSlideHtml({
+        slide: longest,
+        index: 1,
+        total: 5,
+        size,
+        brand: { ...DEFAULT_BRAND, name: 'N'.repeat(60), handle: '@'.padEnd(60, 'h') },
+      }),
       { waitUntil: 'load' }
     );
 
@@ -45,6 +51,7 @@ describe('layout do slide', () => {
     const bottom = await page.locator('.bottom').boundingBox();
     const top = await page.locator('.top').boundingBox();
     const kicker = await page.locator('.kicker').boundingBox();
+    const brand = await page.locator('.brand').boundingBox();
     await page.close();
 
     expect(text && bottom && top).toBeTruthy();
@@ -52,6 +59,7 @@ describe('layout do slide', () => {
     expect(text!.y + text!.height).toBeLessThanOrEqual(bottom!.y);
     expect(bottom!.y + bottom!.height).toBeLessThanOrEqual(size.height);
     expect(kicker!.x + kicker!.width).toBeLessThanOrEqual(size.width);
+    expect(brand!.x + brand!.width).toBeLessThanOrEqual(size.width);
     expect(text!.x + text!.width).toBeLessThanOrEqual(size.width);
   });
 });
