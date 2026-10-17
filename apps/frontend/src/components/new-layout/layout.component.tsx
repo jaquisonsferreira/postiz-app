@@ -116,27 +116,26 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                       id="left-menu"
                       data-testid="sidebar"
                       className={clsx(
-                        'w-[240px] shrink-0 bg-newBgColorInner border-e border-newBorder flex flex-col gap-[22px] px-[14px] py-[20px] sticky top-0 h-screen overflow-y-auto mobile:fixed mobile:start-0 mobile:z-[491]',
+                        'w-[88px] mobile:w-[240px] shrink-0 bg-railBg flex flex-col items-center mobile:items-stretch gap-[28px] px-[18px] py-[22px] sticky top-0 h-screen overflow-y-auto mobile:fixed mobile:start-0 mobile:z-[491]',
                         !menuOpen && 'mobile:hidden'
                       )}
                       onClick={() => setMenuOpen(false)}
                     >
                       <Logo />
                       <TopMenu />
-                      <UserCard />
                     </aside>
                     <main className="flex-1 min-w-0 flex flex-col blurMe">
-                      <header className="flex h-[88px] mobile:h-[64px] px-[32px] mobile:px-[16px] gap-[12px] items-center">
+                      <header className="flex h-[96px] mobile:h-[72px] px-[32px] mobile:px-[16px] gap-[12px] items-center">
                         <button
                           type="button"
-                          className="hidden mobile:flex items-center justify-center w-[44px] h-[44px] -ms-[6px] rounded-[10px] text-textItemBlur hover:text-newTextColor hover:bg-boxFocused"
+                          className="hidden mobile:flex items-center justify-center w-[44px] h-[44px] -ms-[6px] rounded-full bg-newBgColorInner text-newTextColor"
                           onClick={() => setMenuOpen(true)}
                           aria-label="Open menu"
                         >
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
-                            width="22"
-                            height="22"
+                            width="20"
+                            height="20"
                             viewBox="0 0 24 24"
                             fill="none"
                           >
@@ -148,19 +147,22 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                             />
                           </svg>
                         </button>
-                        <div className="font-heading text-[34px] mobile:text-[24px] font-[700] tracking-[-0.02em] flex flex-1 min-w-0">
+                        <div className="text-[28px] mobile:text-[22px] font-[500] tracking-[-0.02em] flex flex-1 min-w-0">
                           <Title />
                         </div>
-                        <div className="flex gap-[20px] mobile:gap-[14px] items-center text-textItemBlur">
-                          <OrganizationSelector />
-                          <div className="hover:text-newTextColor">
-                            <ModeComponent />
-                          </div>
-                          <LanguageComponent />
-                          <div className="contents mobile:hidden">
+                        <div className="flex gap-[12px] items-center text-textItemBlur">
+                          <div className="flex items-center gap-[16px] h-[52px] px-[18px] rounded-full bg-newBgColorInner mobile:hidden">
+                            <OrganizationSelector />
+                            <div className="hover:text-newTextColor">
+                              <ModeComponent />
+                            </div>
+                            <LanguageComponent />
                             <AttachToFeedbackIcon />
                           </div>
-                          <NotificationComponent />
+                          <div className="w-[52px] h-[52px] rounded-full bg-newBgColorInner flex items-center justify-center text-newTextColor">
+                            <NotificationComponent />
+                          </div>
+                          <UserCard />
                         </div>
                       </header>
                       <div className="flex flex-1 min-w-0 px-[32px] pb-[48px] mobile:px-[16px] mobile:flex-col">

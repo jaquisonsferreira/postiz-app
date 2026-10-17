@@ -6,8 +6,7 @@ import 'react-tooltip/dist/react-tooltip.css';
 import '@copilotkit/react-ui/styles.css';
 import LayoutContext from '@gitroom/frontend/components/layout/layout.context';
 import { ReactNode } from 'react';
-import { manrope } from '@gitroom/frontend/fonts/manrope/manrope.font';
-import { bricolageGrotesque } from '@gitroom/frontend/fonts/bricolage-grotesque/bricolage.grotesque.font';
+import { geist } from '@gitroom/frontend/fonts/geist/geist.font';
 import PlausibleProvider from 'next-plausible';
 import clsx from 'clsx';
 import { VariableContextComponent } from '@gitroom/react/helpers/variable.context';
@@ -48,9 +47,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <ChangeDirClient />
       <body
         className={clsx(
-          manrope.className,
-          manrope.variable,
-          bricolageGrotesque.variable,
+          geist.className,
+          geist.variable,
           'light text-primary !bg-primary'
         )}
       >

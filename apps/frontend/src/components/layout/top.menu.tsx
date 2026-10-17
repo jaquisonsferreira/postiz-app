@@ -1,6 +1,7 @@
 'use client';
 
 import { FC, ReactNode } from 'react';
+import clsx from 'clsx';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -232,13 +233,18 @@ export const TopMenu: FC = () => {
   return (
     <nav
       aria-label={t('main_navigation', 'Main navigation')}
-      className="flex flex-col gap-[22px] blurMe"
+      className="flex flex-1 flex-col items-center mobile:items-stretch gap-[18px]"
     >
       {sections.map((section) => (
-        <div key={section.id} className="flex flex-col gap-[2px]">
-          <span className="text-[11px] font-[700] text-menuDots uppercase tracking-[0.08em] px-[12px] pb-[6px]">
-            {section.label}
-          </span>
+        <div
+          key={section.id}
+          role="group"
+          aria-label={section.label}
+          className={clsx(
+            'flex flex-col items-center mobile:items-stretch gap-[8px]',
+            section.id === 'settings' && 'mt-auto'
+          )}
+        >
           {visible
             .filter((item) => item.section === section.id)
             .map((item) => (

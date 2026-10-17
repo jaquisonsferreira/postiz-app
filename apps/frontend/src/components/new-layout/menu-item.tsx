@@ -15,10 +15,10 @@ export const MenuItem: FC<{
   const isActive = currentPath.indexOf(path) === 0;
 
   const className = clsx(
-    'w-full min-h-[44px] px-[12px] py-[10px] flex items-center gap-[12px] rounded-[10px] text-[14px] transition-colors hover:bg-boxFocused hover:text-textItemFocused',
+    'relative w-[52px] h-[52px] mobile:w-full mobile:justify-start mobile:px-[14px] mobile:gap-[12px] flex items-center justify-center rounded-[14px] transition-colors',
     isActive
-      ? 'bg-boxFocused text-textItemFocused font-[700]'
-      : 'text-textItemBlur font-[600]'
+      ? 'bg-accent text-accentInk'
+      : 'text-railIcon hover:text-white hover:bg-white/10'
   );
 
   const inner = (
@@ -26,11 +26,11 @@ export const MenuItem: FC<{
       <span className="flex shrink-0" aria-hidden="true">
         {icon}
       </span>
-      <span className="flex-1 text-start truncate">{label}</span>
+      <span className="hidden mobile:block text-[14px] font-[500]">{label}</span>
       {!!badge && (
         <span
           data-testid="menu-badge"
-          className="min-w-[22px] h-[22px] px-[6px] rounded-[11px] bg-btnPrimary text-white text-[12px] font-[700] flex items-center justify-center"
+          className="absolute top-[4px] end-[4px] min-w-[18px] h-[18px] px-[5px] rounded-[9px] bg-accent text-accentInk text-[11px] font-[700] flex items-center justify-center ring-2 ring-railBg"
         >
           {badge}
         </span>
@@ -38,9 +38,15 @@ export const MenuItem: FC<{
     </>
   );
 
+  const tooltip = {
+    'data-tooltip-id': 'tooltip',
+    'data-tooltip-content': label,
+    'data-tooltip-place': 'right' as const,
+  };
+
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} className={className}>
+      <button type="button" onClick={onClick} aria-label={label} className={className} {...tooltip}>
         {inner}
       </button>
     );
@@ -50,9 +56,11 @@ export const MenuItem: FC<{
     <Link
       prefetch={true}
       href={path}
+      aria-label={label}
       aria-current={isActive ? 'page' : undefined}
       {...(path.indexOf('http') === 0 && { target: '_blank' })}
       className={className}
+      {...tooltip}
     >
       {inner}
     </Link>
