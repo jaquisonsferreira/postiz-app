@@ -110,16 +110,18 @@ export class CompositionService {
     };
   }
 
+  private async availableIntegration(org: string, integrationId: string) {
+    const integration = await this._integrationService.getIntegrationById(org, integrationId);
+    if (!integration || integration.deletedAt || integration.disabled) {
+      throw new CompositionValidationError(`Channel ${integrationId} is not available`);
+    }
+    return integration;
+  }
+
   private async resolveTargets(org: string, targets: CreateCompositionDto['targets']) {
     const resolved = [];
     for (const target of targets) {
-      const integration = await this._integrationService.getIntegrationById(
-        org,
-        target.integrationId
-      );
-      if (!integration || integration.deletedAt || integration.disabled) {
-        throw new CompositionValidationError(`Channel ${target.integrationId} is not available`);
-      }
+      const integration = await this.availableIntegration(org, target.integrationId);
       resolved.push({ ...target, providerIdentifier: integration.providerIdentifier });
     }
     return resolved;
@@ -267,6 +269,11 @@ export class CompositionService {
       });
     }
     try {
+      // a channel disabled or removed while the composition waited is not
+      // queued: its drafts stay for the user to move to another channel
+      for (const post of stored) {
+        await this.availableIntegration(org, post.integration.id);
+      }
       await this.assertValid(org, stored);
     } catch (err: unknown) {
       if (err instanceof CompositionValidationError) {
@@ -561,9 +568,14 @@ export class CompositionService {
   // queued: a retry that runs after a post was published never queues it again.
   // changePostStatus queues the first post of a thread; the rest is published
   // from it, so its posts only follow the state
-  private async queuePosts(organizationId: string, posts: CompositionPost[]) {
+  private async queuePosts(
+    organizationId: string,
+    posts: CompositionPost[],
+    hold: () => Promise<void> = async () => undefined
+  ) {
     const started: CompositionPost[] = [];
     for (const post of posts) {
+      await hold();
       const existing = await this._postsService.getPostById(post.postId, organizationId);
       if (!existing || existing.deletedAt) {
         throw new CompositionValidationError(
@@ -623,7 +635,13 @@ export class CompositionService {
       return;
     }
     if (!requiresApproval) {
-      await this.queuePosts(organizationId, posts);
+      // the lease is renewed before each post, so a retry never takes over
+      // while this attempt is still starting publishing workflows
+      await this.queuePosts(organizationId, posts, async () => {
+        if (!(await this._compositionRepository.holdQueueing(id, lease)).count) {
+          throw new Error(`Composition ${id} was changed by another attempt`);
+        }
+      });
     }
     const finished = await this._compositionRepository.finishQueueing(
       id,

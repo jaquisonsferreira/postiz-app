@@ -199,6 +199,20 @@ export class CompositionRepository {
     });
   }
 
+  holdQueueing(id: string, lease: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: 'queueing',
+        schedulingLease: lease,
+      },
+      data: {
+        schedulingLease: lease,
+      },
+    });
+  }
+
   finishQueueing(id: string, lease: string, status: string) {
     return this._composition.model.composition.updateMany({
       where: {

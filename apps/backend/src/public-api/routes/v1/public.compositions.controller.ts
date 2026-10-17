@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, ValidationPipe } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Organization } from '@prisma/client';
 import * as Sentry from '@sentry/nestjs';
@@ -20,7 +20,9 @@ export class PublicCompositionsController {
   @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
   startComposition(
     @GetOrgFromRequest() org: Organization,
-    @Body() body: CreateCompositionDto
+    // the whole body is stored on the composition, so only the contract's
+    // fields are kept: the route accepts large payloads for slide text
+    @Body(new ValidationPipe({ whitelist: true, transform: true })) body: CreateCompositionDto
   ) {
     Sentry.metrics.count('public_api-request', 1);
     return this._compositionService.startComposition(org, body);
