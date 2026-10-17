@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsDateString,
   IsNotEmpty,
   IsString,
   IsUUID,
@@ -12,9 +13,11 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 export class AdsSummaryDto {
   @Matches(DAY)
+  @IsDateString({ strict: true })
   from: string;
 
   @Matches(DAY)
+  @IsDateString({ strict: true })
   to: string;
 }
 

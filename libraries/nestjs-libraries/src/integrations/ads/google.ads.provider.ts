@@ -18,6 +18,7 @@ const GOOGLE_ADS_API_VERSION = 'v25';
 const API_URL = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`;
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const DEFAULT_TOKEN_LIFETIME = 3600;
 
 const STATUS: Record<string, AdsCampaignStatus> = {
   ENABLED: 'active',
@@ -110,7 +111,7 @@ export class GoogleAdsProvider implements AdsProvider {
     return {
       accessToken: tokens.access_token || '',
       refreshToken: tokens.refresh_token || '',
-      expiresIn: tokens.expires_in || 0,
+      expiresIn: tokens.expires_in || DEFAULT_TOKEN_LIFETIME,
     };
   }
 
@@ -122,7 +123,7 @@ export class GoogleAdsProvider implements AdsProvider {
     return {
       accessToken: tokens.access_token || '',
       refreshToken: tokens.refresh_token || refreshToken,
-      expiresIn: tokens.expires_in || 0,
+      expiresIn: tokens.expires_in || DEFAULT_TOKEN_LIFETIME,
     };
   }
 

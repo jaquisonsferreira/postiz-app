@@ -151,8 +151,7 @@ const AccountsCard: FC<{ accounts: AdAccount[]; providers: AdsProviderOption[] }
         !(await deleteDialog(
           t('ads_remove_account_question', 'Remove {{name}}? Its campaigns stop showing here, nothing changes on the platform.', {
             name: account.name,
-          }),
-          t('ads_remove', 'Remove')
+          })
         ))
       ) {
         return;
@@ -312,7 +311,7 @@ export const AdsComponent: FC = () => {
 
   const range = useMemo(
     () => ({
-      from: date().subtract(PERIODS[period], 'day').format('YYYY-MM-DD'),
+      from: date().subtract(PERIODS[period] - 1, 'day').format('YYYY-MM-DD'),
       to: date().format('YYYY-MM-DD'),
     }),
     [period, date]

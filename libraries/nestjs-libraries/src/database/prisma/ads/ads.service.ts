@@ -18,7 +18,7 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/ads/ads.errors';
 
 const LOGIN_TTL_SECONDS = 3600;
-const FIRST_SYNC_DAYS = 30;
+const FIRST_SYNC_DAYS = 90;
 // Platforms keep adjusting the last days (late conversions, invalid clicks)
 const RESYNC_DAYS = 3;
 const TOKEN_MARGIN_MS = 5 * 60 * 1000;

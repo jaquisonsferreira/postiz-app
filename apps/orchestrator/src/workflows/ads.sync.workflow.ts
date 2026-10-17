@@ -1,5 +1,6 @@
 import {
   continueAsNew,
+  log,
   proxyActivities,
   sleep,
   workflowInfo,
@@ -17,9 +18,17 @@ const { syncAdAccounts } = proxyActivities<AdsActivity>({
   },
 });
 
+const syncLogged = async () => {
+  try {
+    await syncAdAccounts();
+  } catch (err) {
+    log.error('Ad accounts sync failed, trying again in the next hour', { err });
+  }
+};
+
 export async function adsSyncWorkflow() {
   let loops = 0;
-  await syncAdAccounts();
+  await syncLogged();
   while (true) {
     await sleep('1 hour');
 
@@ -28,6 +37,6 @@ export async function adsSyncWorkflow() {
       return await continueAsNew<typeof adsSyncWorkflow>();
     }
 
-    await syncAdAccounts();
+    await syncLogged();
   }
 }

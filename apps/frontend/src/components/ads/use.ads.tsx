@@ -91,7 +91,9 @@ export const useAdsSummary = (from: string, to: string) => {
   const load = useCallback(async (path: string) => {
     return (await (await fetch(path)).json()) as AdsSummary;
   }, []);
-  return useSWR(`/ads/summary?from=${from}&to=${to}`, load);
+  return useSWR(`/ads/summary?from=${from}&to=${to}`, load, {
+    keepPreviousData: true,
+  });
 };
 
 // Accounts and summary change together: a new or removed account changes the numbers
