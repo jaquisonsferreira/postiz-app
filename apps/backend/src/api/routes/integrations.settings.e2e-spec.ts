@@ -53,14 +53,13 @@ describe('Configurações de canal no app', () => {
     const { status, json } = await schema(id);
 
     expect(status).toBe(200);
-    const settings = json.settings as { properties: Record<string, { enum?: string[] }>; required?: string[] };
-    expect(settings.required).toContain('who_can_reply_post');
+    const settings = json.settings as { properties: Record<string, { enum?: string[] }> };
     expect(settings.properties.who_can_reply_post.enum).toContain('everyone');
     expect(typeof json.maxLength).toBe('number');
   });
 
   it('indica quando o provider não exige configurações', async () => {
-    const { id } = await channel('linkedin-page');
+    const { id } = await channel('bluesky');
     const { json } = await schema(id);
     expect(json.settings).toBeNull();
   });

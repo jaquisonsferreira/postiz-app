@@ -28,6 +28,8 @@ import utc from 'dayjs/plugin/utc';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { TemporalService } from 'nestjs-temporal-core';
+import { socialIntegrationList } from '@gitroom/nestjs-libraries/integrations/integration.manager';
+import { getValidationSchemas } from '@gitroom/nestjs-libraries/chat/validation.schemas.helper';
 
 dayjs.extend(utc);
 
@@ -43,6 +45,27 @@ export class IntegrationService {
     private _refreshIntegrationService: RefreshIntegrationService,
     private _temporalService: TemporalService
   ) {}
+
+  // The JSON schema of the settings a channel's provider validates, so a
+  // client can ask for them before sending a post
+  async getSettingsSchema(orgId: string, id: string) {
+    const integration = await this.getIntegrationById(orgId, id);
+    if (!integration) {
+      throw new HttpException('Integration not found', HttpStatus.NOT_FOUND);
+    }
+    const provider = socialIntegrationList.find(
+      (item) => item.identifier === integration.providerIdentifier
+    );
+    const verified =
+      JSON.parse(integration.additionalSettings || '[]')?.find(
+        (setting: { title?: string; value?: boolean }) => setting?.title === 'Verified'
+      )?.value || false;
+    return {
+      identifier: integration.providerIdentifier,
+      maxLength: provider ? provider.maxLength(verified) : 0,
+      settings: provider?.dto ? getValidationSchemas()[provider.dto.name] || null : null,
+    };
+  }
 
   async changeActiveCron(orgId: string) {
     const data = await this._autopostsRepository.getAutoposts(orgId);
