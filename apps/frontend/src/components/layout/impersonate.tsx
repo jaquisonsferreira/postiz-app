@@ -359,7 +359,8 @@ const ChargesModal: FC<{ close: () => void }> = ({ close }) => {
       !(await deleteDialog(
         t(
           'refund_selected_confirm',
-          `Are you sure you want to refund ${selected.size} charge(s)? This cannot be undone.`
+          'Are you sure you want to refund {{charges}} charge(s)? This cannot be undone.',
+          { charges: selected.size }
         ),
         t('yes_refund', 'Yes, refund'),
         t('confirm_refund', 'Confirm Refund'),
@@ -925,7 +926,8 @@ const SwitchUser = () => {
       !(await deleteDialog(
         t(
           'switch_user_confirm',
-          `This will replace the current account's login with ${selected.email}. All data and the subscription stay with the account — only the login changes, and the new login gains its full access. Switch back to revert.`
+          "This will replace the current account's login with {{email}}. All data and the subscription stay with the account — only the login changes, and the new login gains its full access. Switch back to revert.",
+          { email: selected.email }
         ),
         t('yes_switch', 'Yes, switch'),
         t('switch_user_title', 'Switch User?'),
