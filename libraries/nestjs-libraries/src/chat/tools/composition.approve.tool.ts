@@ -24,7 +24,7 @@ export class CompositionApproveTool implements AgentToolInterface {
         annotations: {
           title: 'Approve Composition',
           readOnlyHint: false,
-          destructiveHint: false,
+          destructiveHint: true,
           idempotentHint: false,
           openWorldHint: true,
         },
