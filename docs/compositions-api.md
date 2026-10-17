@@ -56,7 +56,7 @@ Todas as rotas usam a chave de API da organização no header `Authorization` (a
 | `slides[].background` | `{ "type": "ai", "prompt" }` gera a imagem com IA (consome créditos `ai_images`, exige `OPENAI_API_KEY`); `{ "type": "url", "url" }` usa uma imagem HTTPS pública. O texto é sobreposto com degradê para legibilidade. |
 | `targets[]` | 1 a 20 canais. `content` é a legenda (quebras de linha preservadas), `comments` vira o fio/comentários seguintes, `settings` são as configurações do provider (as mesmas de `GET /public/v1/integration-settings/:id`). |
 
-Respostas de erro imediatas (`400`): payload inválido, canal inexistente, desativado ou de outra organização, e configurações obrigatórias do provider ausentes (a mensagem cita o campo, por exemplo `who_can_reply_post`).
+Respostas de erro imediatas: `402` quando faltam créditos de IA para os fundos `type: "ai"` (só com cobrança ativa), `429` acima do limite de requisições da API pública, e `400` para payload inválido, canal inexistente, desativado ou de outra organização, e configurações obrigatórias do provider ausentes (a mensagem cita o campo, por exemplo `who_can_reply_post`).
 
 Erros que só aparecem durante a geração (imagem remota inacessível, mídia incompatível com a rede, limite de caracteres) deixam a composição em `failed` com o motivo em `error`.
 
@@ -73,7 +73,7 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
   "requiresApproval": true,
   "error": null,
   "media": [{ "id": "…", "path": "https://…/uploads/2026/10/17/….png" }],
-  "posts": [{ "postId": "…", "integration": "<id do canal>" }],
+  "posts": [{ "postId": "…", "integration": "<id do canal>", "target": 0 }],
   "createdAt": "…",
   "updatedAt": "…"
 }
@@ -93,9 +93,12 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
 | --- | --- |
 | `CHROMIUM_EXECUTABLE_PATH` | Chromium usado pelo orchestrator. Vazio usa o instalado por `pnpm exec playwright-core install chromium` (já incluso na imagem Docker). |
 | `OPENAI_API_KEY` | Necessária apenas para fundos `type: "ai"`. |
+| `COMPOSITION_RENDER_CONCURRENCY` | Quantas composições cada orchestrator renderiza ao mesmo tempo (padrão 2), para o Chromium não disputar memória com a publicação. |
 | `STORAGE_PROVIDER` | `local` ou `cloudflare`, como o restante das mídias do Postiz. |
 
-Segurança: o HTML dos slides é renderizado com JavaScript desativado e só pode acessar o Google Fonts. Imagens remotas são baixadas pelo backend com proteção contra SSRF (endereços internos são bloqueados), limitadas a 15 MB e reencodadas em PNG.
+Segurança: o HTML dos slides é renderizado com JavaScript desativado e só pode acessar o Google Fonts. Imagens remotas são baixadas pelo orchestrator com proteção contra SSRF (endereços internos são bloqueados, inclusive escritos como IP), limitadas a 15 MB durante o download, com timeout de 30 s, e reencodadas em PNG.
+
+Retentativas: cada slide e cada post é gravado na composição assim que existe, então uma nova tentativa continua de onde parou sem cobrar a IA de novo nem duplicar posts. Falhas de rede, 5xx e 429 são retentadas; erros que não mudam com nova tentativa encerram a composição em `failed`.
 
 ## Testes
 
