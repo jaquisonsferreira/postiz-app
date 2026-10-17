@@ -1,20 +1,8 @@
 export const fallbackLng = 'en';
-export const languages = [
-  fallbackLng,
-  'he',
-  'ru',
-  'zh',
-  'fr',
-  'es',
-  'pt',
-  'de',
-  'it',
-  'ja',
-  'ko',
-  'ar',
-  'tr',
-  'vi',
-];
+export const languages = [fallbackLng, 'pt'];
+export const displayLocales: Record<string, string> = {
+  pt: 'pt-BR',
+};
 
 export const defaultNS = 'translation';
 export const cookieName = 'i18next';
