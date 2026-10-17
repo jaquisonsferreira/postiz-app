@@ -924,5 +924,11 @@
   "copy_debug": "Copy debug",
   "duplicate": "Duplicate",
   "calendar_view": "Calendar view",
-  "connect_channel": "Connect a channel"
+  "connect_channel": "Connect a channel",
+  "upcoming": "Upcoming",
+  "drafts": "Drafts",
+  "post_status": "Post status",
+  "no_pending_approvals": "No composition is waiting for approval.",
+  "composition_summary": "{{slides}} slides · {{channels}} channels",
+  "no_posts_in_status": "No posts here yet. Create a post or approve a composition."
 }

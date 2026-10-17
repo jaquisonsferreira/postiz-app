@@ -922,5 +922,11 @@
   "copy_debug": "Copiar depuração",
   "duplicate": "Duplicar",
   "calendar_view": "Visão do calendário",
-  "connect_channel": "Conectar um canal"
+  "connect_channel": "Conectar um canal",
+  "upcoming": "Próximos",
+  "drafts": "Rascunhos",
+  "post_status": "Status do post",
+  "no_pending_approvals": "Nenhuma composição aguardando aprovação.",
+  "composition_summary": "{{slides}} slides · {{channels}} canais",
+  "no_posts_in_status": "Nenhum post aqui ainda. Crie um post ou aprove uma composição."
 }

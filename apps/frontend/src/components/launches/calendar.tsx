@@ -164,7 +164,7 @@ const DayNowLine: FC<{ now: dayjs.Dayjs; className?: string }> = ({
 );
 
 // Shared hook for post actions (edit, delete, statistics)
-const usePostActions = (onMutate?: () => void) => {
+export const usePostActions = (onMutate?: () => void) => {
   const t = useT();
   const fetch = useFetch();
   const modal = useModals();
