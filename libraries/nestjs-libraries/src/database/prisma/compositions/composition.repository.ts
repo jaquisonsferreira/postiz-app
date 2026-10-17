@@ -133,17 +133,19 @@ export class CompositionRepository {
     });
   }
 
-  // An approval that stopped halfway stays "approving" and can be sent again;
-  // flipping a post that is already queued is harmless
+  // One approval at a time: an "approving" composition can be claimed again
+  // only once the approval holding it has been silent for two minutes, so an
+  // approval that stopped halfway can be sent again but two at once can't run
   claimApproval(org: string, id: string) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
         organizationId: org,
         deletedAt: null,
-        status: {
-          in: ['awaiting_approval', 'approving'],
-        },
+        OR: [
+          { status: 'awaiting_approval' },
+          { status: 'approving', updatedAt: { lt: new Date(Date.now() - 2 * 60 * 1000) } },
+        ],
       },
       data: {
         status: 'approving',

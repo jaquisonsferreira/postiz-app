@@ -204,7 +204,8 @@ export class CompositionService {
   }
 
   async getCompositions(org: string, page: number) {
-    const safePage = Math.max(0, Math.floor(Number(page) || 0));
+    const requested = Number(page);
+    const safePage = Number.isFinite(requested) ? Math.max(0, Math.floor(requested)) : 0;
     return (await this._compositionRepository.getCompositions(org, safePage)).map((c) =>
       this.present(c)
     );
@@ -212,6 +213,15 @@ export class CompositionService {
 
   async approveComposition(org: string, id: string) {
     const composition = await this.getComposition(org, id);
+    for (const post of composition.posts) {
+      const existing = await this._postsService.getPostById(post.postId, org);
+      if (!existing || existing.deletedAt) {
+        throw new HttpException(
+          `The post for channel ${post.integration} was deleted, delete the composition and send it again`,
+          400
+        );
+      }
+    }
     const claimed = await this._compositionRepository.claimApproval(org, id);
     if (!claimed.count) {
       throw new HttpException(
@@ -221,7 +231,7 @@ export class CompositionService {
     }
 
     for (const post of composition.posts) {
-      await this.queuePost(org, post.postId);
+      await this.queuePost(org, post.postId, post.integration);
     }
     await this._compositionRepository.updateComposition(id, { status: 'scheduled' });
 
@@ -441,14 +451,41 @@ export class CompositionService {
 
   // changePostStatus queues the first post and starts its workflow; the rest of
   // a thread is published from it, so its posts only follow the state
+  // changePostStatus swallows a failed workflow start, which would leave a
+  // queued post that nothing publishes: the post goes back to draft and the
+  // error is raised, so the retry queues it again
+  private async assertPublishingStarted(organizationId: string, postId: string) {
+    try {
+      const handle = await this._temporalService.client.getWorkflowHandle(`post_${postId}`);
+      const { status } = await handle.describe();
+      if (status.name === 'RUNNING' || status.name === 'COMPLETED') {
+        return;
+      }
+    } catch (err: unknown) {
+      this._logger.warn(
+        `No publishing workflow for post ${postId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+    await this._postsService.changeState(postId, 'DRAFT');
+    throw new Error(`The publishing of post ${postId} could not be started`);
+  }
+
   // Only a draft is queued: a retry that runs after the post was published must
   // not put it back in the queue and publish it a second time
-  private async queuePost(organizationId: string, postId: string) {
+  private async queuePost(organizationId: string, postId: string, integration: string) {
     const post = await this._postsService.getPostById(postId, organizationId);
-    if (!post || post.deletedAt || post.state !== 'DRAFT') {
+    if (!post || post.deletedAt) {
+      throw new CompositionValidationError(
+        `The post for channel ${integration} was deleted, delete the composition and send it again`
+      );
+    }
+    if (post.state !== 'DRAFT') {
       return;
     }
     await this._postsService.changePostStatus(organizationId, postId, 'schedule');
+    await this.assertPublishingStarted(organizationId, postId);
     const [, ...thread] = await this._postsService.getPostsRecursively(
       postId,
       false,
@@ -479,7 +516,7 @@ export class CompositionService {
     }
     if (!requiresApproval) {
       for (const post of posts) {
-        await this.queuePost(organizationId, post.postId);
+        await this.queuePost(organizationId, post.postId, post.integration);
       }
     }
     await this._compositionRepository.updateComposition(id, {
