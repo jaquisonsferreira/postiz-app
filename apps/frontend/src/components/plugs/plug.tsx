@@ -125,7 +125,7 @@ export const PlugPop: FC<{
         })),
       }),
     });
-    toaster.show('Plug updated', 'success');
+    toaster.show(t('plug_updated', 'Plug updated'), 'success');
     closeAll();
   }, []);
 

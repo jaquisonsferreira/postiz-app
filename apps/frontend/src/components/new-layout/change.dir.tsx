@@ -4,6 +4,7 @@ import useCookie from 'react-use-cookie';
 import {
   cookieName,
   fallbackLng,
+  languages,
 } from '@gitroom/react/translation/i18n.config';
 import i18next from 'i18next';
 import { FC, useEffect } from 'react';
@@ -14,7 +15,10 @@ export const ChangeDir: FC = () => {
 
   useEffect(() => {
     const rtlLanguages = ['he', 'ar'];
-    const dir = rtlLanguages.includes(language) ? 'rtl' : 'ltr';
+    const dir =
+      languages.includes(language) && rtlLanguages.includes(language)
+        ? 'rtl'
+        : 'ltr';
     document.documentElement.setAttribute('dir', dir);
   }, []);
 
