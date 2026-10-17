@@ -34,6 +34,12 @@ describe('MetaAdsProvider', () => {
     jest.restoreAllMocks();
   });
 
+  it('is available only when the Meta app is configured', () => {
+    expect(provider.isConfigured()).toBe(true);
+    delete process.env.FACEBOOK_APP_SECRET;
+    expect(provider.isConfigured()).toBe(false);
+  });
+
   it('asks only for the ads read scopes and returns to the ads callback', async () => {
     const { url, state } = await provider.generateAuthUrl();
     const parsed = new URL(url);

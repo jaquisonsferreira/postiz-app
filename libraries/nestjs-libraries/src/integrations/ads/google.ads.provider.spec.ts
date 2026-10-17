@@ -38,6 +38,12 @@ describe('GoogleAdsProvider', () => {
     jest.restoreAllMocks();
   });
 
+  it('is available only when the Google Ads client is configured', () => {
+    expect(provider.isConfigured()).toBe(true);
+    delete process.env.GOOGLE_ADS_CLIENT_SECRET;
+    expect(provider.isConfigured()).toBe(false);
+  });
+
   it('asks for offline access to the adwords scope', async () => {
     const { url, state } = await provider.generateAuthUrl();
     const parsed = new URL(url);
