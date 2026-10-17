@@ -19,6 +19,11 @@ import { DeletePostTool } from '@gitroom/nestjs-libraries/chat/tools/delete.post
 import { UploadWidgetTool } from '@gitroom/nestjs-libraries/chat/tools/upload.widget.tool';
 import { UploadWidgetTicketTool } from '@gitroom/nestjs-libraries/chat/tools/upload.widget.ticket.tool';
 import { UploadWidgetStatusTool } from '@gitroom/nestjs-libraries/chat/tools/upload.widget.status.tool';
+import { CompositionCreateTool } from '@gitroom/nestjs-libraries/chat/tools/composition.create.tool';
+import { CompositionsListTool } from '@gitroom/nestjs-libraries/chat/tools/compositions.list.tool';
+import { CompositionGetTool } from '@gitroom/nestjs-libraries/chat/tools/composition.get.tool';
+import { CompositionApproveTool } from '@gitroom/nestjs-libraries/chat/tools/composition.approve.tool';
+import { CompositionDeleteTool } from '@gitroom/nestjs-libraries/chat/tools/composition.delete.tool';
 
 export const toolList = [
   IntegrationListTool,
@@ -29,6 +34,11 @@ export const toolList = [
   PostsListTool,
   PostSettingsTool,
   DeletePostTool,
+  CompositionCreateTool,
+  CompositionsListTool,
+  CompositionGetTool,
+  CompositionApproveTool,
+  CompositionDeleteTool,
   GenerateVideoOptionsTool,
   VideoFunctionTool,
   GenerateVideoTool,
