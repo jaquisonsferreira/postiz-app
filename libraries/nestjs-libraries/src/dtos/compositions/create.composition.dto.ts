@@ -56,6 +56,26 @@ class SlidesMatchFormat implements ValidatorConstraintInterface {
   }
 }
 
+// The template needs something to draw: a slide with no text and no
+// background would only fail later, inside the workflow
+@ValidatorConstraint({ name: 'slideHasContent' })
+class SlideHasContent implements ValidatorConstraintInterface {
+  validate(slide: unknown): boolean {
+    if (!slide || typeof slide !== 'object') {
+      return true;
+    }
+    const { kicker, headline, body, background } = slide as CompositionSlideDto;
+    return (
+      [kicker, headline, body].some((text) => typeof text === 'string' && !!text.trim()) ||
+      !!background
+    );
+  }
+
+  defaultMessage(): string {
+    return 'each slide needs a kicker, headline, body or background';
+  }
+}
+
 export class CompositionBackgroundDto {
   @IsIn(['ai', 'url'])
   type: 'ai' | 'url';
@@ -159,9 +179,11 @@ export class CompositionTargetDto {
 
 export class CompositionTagDto {
   @IsString()
+  @MaxLength(100)
   value: string;
 
   @IsString()
+  @MaxLength(100)
   label: string;
 }
 
@@ -192,6 +214,7 @@ export class CreateCompositionDto {
   )
   @IsArray()
   @IsObject({ each: true })
+  @Validate(SlideHasContent, { each: true })
   @ValidateNested({ each: true })
   @Type(() => CompositionSlideDto)
   slides?: CompositionSlideDto[];
@@ -199,12 +222,15 @@ export class CreateCompositionDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(20)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => CompositionTargetDto)
   targets: CompositionTargetDto[];
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(20)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => CompositionTagDto)
   tags?: CompositionTagDto[];

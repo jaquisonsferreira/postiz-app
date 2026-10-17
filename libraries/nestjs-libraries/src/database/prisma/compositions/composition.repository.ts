@@ -179,29 +179,33 @@ export class CompositionRepository {
     });
   }
 
-  // Finishing starts only from a processing state: an attempt that timed out
-  // and resumes after a retry finished (or after the approval) claims nothing
-  claimQueueing(id: string) {
+  // Queueing takes the same lease: from a processing state, or from a
+  // queueing attempt that has been silent for two minutes, so two attempts
+  // never start the publishing workflows of the same posts at once
+  claimQueueing(id: string, lease: string) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
         deletedAt: null,
-        status: {
-          in: ['pending', 'rendering', 'scheduling', 'queueing'],
-        },
+        OR: [
+          { status: { in: ['pending', 'rendering', 'scheduling'] } },
+          { status: 'queueing', updatedAt: { lt: new Date(Date.now() - SCHEDULING_LEASE_MS) } },
+        ],
       },
       data: {
         status: 'queueing',
+        schedulingLease: lease,
       },
     });
   }
 
-  finishQueueing(id: string, status: string) {
+  finishQueueing(id: string, lease: string, status: string) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
         deletedAt: null,
         status: 'queueing',
+        schedulingLease: lease,
       },
       data: {
         status,

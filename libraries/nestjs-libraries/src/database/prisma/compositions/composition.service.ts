@@ -524,10 +524,10 @@ export class CompositionService {
             previous,
             JSON.stringify(media)
           );
+          // another attempt saved this slide first: the retry starts again from
+          // the stored checkpoint, and stops there if the composition is gone
           if (!written.count) {
-            throw new CompositionValidationError(
-              'The composition was deleted, failed or rendered by another attempt'
-            );
+            throw new Error(`Composition ${id} was changed by another render attempt`);
           }
           await ioRedis.del(backgroundKey(id, index));
         }
@@ -612,18 +612,27 @@ export class CompositionService {
     posts: CompositionPost[]
   ) {
     // claimed only from a processing state: an attempt that timed out and
-    // resumes after a retry finished, an approval or a failure claims nothing
-    const claimed = await this._compositionRepository.claimQueueing(id);
-    if (!claimed.count) {
+    // resumes after a retry finished, an approval or a failure claims nothing,
+    // and one that finds another attempt queueing waits for it
+    const lease = randomUUID();
+    if (!(await this._compositionRepository.claimQueueing(id, lease)).count) {
+      const current = await this._compositionRepository.getCompositionById(id);
+      if (current?.status === 'queueing') {
+        throw new Error(`Composition ${id} is being queued by another attempt`);
+      }
       return;
     }
     if (!requiresApproval) {
       await this.queuePosts(organizationId, posts);
     }
-    await this._compositionRepository.finishQueueing(
+    const finished = await this._compositionRepository.finishQueueing(
       id,
+      lease,
       requiresApproval ? 'awaiting_approval' : 'scheduled'
     );
+    if (!finished.count) {
+      throw new Error(`Composition ${id} was changed by another attempt`);
+    }
   }
 
   async schedule(id: string): Promise<CompositionPost[]> {
