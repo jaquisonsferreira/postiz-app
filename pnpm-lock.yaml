@@ -494,6 +494,9 @@ importers:
       parse5:
         specifier: ^6.0.1
         version: 6.0.1
+      playwright-core:
+        specifier: 1.58.2
+        version: 1.58.2
       polotno:
         specifier: ^3.0.0-beta.25
         version: 3.0.0-beta.25(@types/react@19.1.8)(@types/sortablejs@1.15.9)(konva@10.2.0)(react-dom@19.2.4(react@19.2.4))(react-native@0.84.1(@babel/core@8.0.5)(@types/react@19.1.8)(bufferutil@4.1.0)(react@19.2.4)(utf-8-validate@5.0.10))(react@19.2.4)(typescript@5.5.4)
