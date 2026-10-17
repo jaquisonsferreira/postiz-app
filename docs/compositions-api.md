@@ -53,10 +53,10 @@ Todas as rotas usam a chave de API da organização no header `Authorization` (a
 | `size` | `portrait` 1080×1350 (padrão), `square` 1080×1080, `story` 1080×1920. |
 | `brand` | Opcional. Cores `#RRGGBB`, fontes do Google Fonts, `logoUrl` HTTPS. Sem marca usa o modelo Editorial roxo. |
 | `slides[].theme` | `accent`, `light` ou `dark`. Padrão: capa `accent`, último slide (de 3 ou mais) `dark`, demais `light`. |
-| `slides[].background` | `{ "type": "ai", "prompt" }` gera a imagem com IA (consome créditos `ai_images`, exige `OPENAI_API_KEY`); `{ "type": "url", "url" }` usa uma imagem HTTPS pública. O texto é sobreposto com degradê para legibilidade. |
-| `targets[]` | 1 a 20 canais. `content` é a legenda (quebras de linha preservadas), `comments` vira o fio/comentários seguintes, `settings` são as configurações do provider (as mesmas de `GET /public/v1/integration-settings/:id`). |
+| `slides[].background` | `{ "type": "ai", "prompt" }` gera a imagem com IA (consome créditos `ai_images`, exige `OPENAI_API_KEY`); `{ "type": "url", "url" }` usa uma imagem HTTPS pública. A imagem é gerada vertical, ou quadrada em `size: "square"`. O texto é sobreposto com degradê para legibilidade. |
+| `targets[]` | 1 a 20 canais. `content` é a legenda (quebras de linha preservadas), `comments` vira o fio/comentários seguintes (só em canais que publicam comentários), `settings` são as configurações do provider (as mesmas de `GET /public/v1/integration-settings/:id`, até 20 000 caracteres em JSON e 10 níveis). |
 
-Respostas de erro imediatas: `402` quando faltam créditos de IA para os fundos `type: "ai"` (só com cobrança ativa), `429` acima do limite de requisições da API pública, e `400` para payload inválido, canal inexistente, desativado ou de outra organização, e configurações obrigatórias do provider ausentes (a mensagem cita o campo, por exemplo `who_can_reply_post`).
+Respostas de erro imediatas: `402` quando faltam créditos de IA para os fundos `type: "ai"` (só com cobrança ativa), `429` acima do limite de requisições da API pública, e `400` para payload inválido, canal inexistente, desativado ou de outra organização, `comments` em canal que não publica comentários, e configurações obrigatórias do provider ausentes (a mensagem cita o campo, por exemplo `who_can_reply_post`).
 
 Erros que só aparecem durante a geração (imagem remota inacessível, mídia incompatível com a rede, limite de caracteres) deixam a composição em `failed` com o motivo em `error`.
 
@@ -81,11 +81,11 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
 
 ## Aprovar
 
-`POST /public/v1/compositions/:id/approve`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e retorna a composição com `status: "scheduled"`.
+`POST /public/v1/compositions/:id/approve`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e retorna a composição com `status: "scheduled"`. Uma aprovação por vez: outra enviada enquanto a primeira enfileira os posts responde `400`, e uma que parou no meio pode ser reenviada depois de dois minutos.
 
 ## Excluir
 
-`DELETE /public/v1/compositions/:id`. Interrompe a geração se ainda estiver em andamento, remove os posts (cancelando a publicação agendada) e a composição.
+`DELETE /public/v1/compositions/:id`. Interrompe a geração se ainda estiver em andamento, remove os posts (cancelando a publicação agendada) e a composição. Pode ser reenviado: uma exclusão interrompida termina de remover os posts.
 
 ## Configuração
 
@@ -98,7 +98,7 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
 
 Segurança: o HTML dos slides é renderizado com JavaScript desativado e só pode acessar o Google Fonts. Imagens remotas são baixadas pelo orchestrator com proteção contra SSRF (endereços internos são bloqueados, inclusive escritos como IP), limitadas a 15 MB durante o download, com timeout de 30 s, e reencodadas em PNG.
 
-Retentativas: cada slide e cada post é gravado na composição assim que existe, então uma nova tentativa continua de onde parou sem cobrar a IA de novo nem duplicar posts. Falhas de rede, 5xx e 429 são retentadas; erros que não mudam com nova tentativa encerram a composição em `failed`.
+Retentativas: cada slide e cada post é gravado na composição assim que existe, então uma nova tentativa continua de onde parou sem cobrar a IA de novo nem duplicar posts. Falhas de rede (inclusive DNS temporariamente indisponível), 5xx e 429 são retentadas; erros que não mudam com nova tentativa encerram a composição em `failed`.
 
 ## Testes
 

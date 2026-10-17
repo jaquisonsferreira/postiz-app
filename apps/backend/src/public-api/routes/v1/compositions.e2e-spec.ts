@@ -11,6 +11,7 @@ import { CompositionRepository } from '@gitroom/nestjs-libraries/database/prisma
 const API_URL = process.env.E2E_API_URL || 'http://localhost:3000';
 const UPLOAD_DIRECTORY = process.env.UPLOAD_DIRECTORY as string;
 const TEMPORAL_UI_URL = process.env.E2E_TEMPORAL_UI_URL || 'http://localhost:8080';
+const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || 'default';
 
 const prisma = new PrismaService();
 const compositions = new CompositionRepository(new PrismaRepository<'composition'>(prisma));
@@ -78,7 +79,7 @@ const eventually = async (check: () => Promise<boolean>): Promise<void> => {
 const runningWorkflows = async (postId: string): Promise<number> => {
   const query = encodeURIComponent(`postId="${postId}" AND ExecutionStatus="Running"`);
   const response = await fetch(
-    `${TEMPORAL_UI_URL}/api/v1/namespaces/default/workflows?query=${query}`
+    `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows?query=${query}`
   );
   const json = (await response.json()) as { executions?: unknown[] };
   return json.executions?.length || 0;
@@ -583,5 +584,81 @@ describe('Composições pela API pública', () => {
     expect((await compositions.holdQueueing(id, 'segunda')).count).toBe(0);
     expect((await compositions.holdQueueing(id, 'primeira')).count).toBe(1);
     expect((await compositions.claimQueueing(id, 'segunda')).count).toBe(0);
+  });
+  it('recusa comentários em canal que não publica comentários', async () => {
+    const pinterest = await createIntegration(orgId, 'pinterest');
+    const { status, json } = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      targets: [{ integrationId: pinterest.id, content: 'Pin', comments: ['Comentário'] }],
+    });
+    expect(status).toBe(400);
+    expect(JSON.stringify(json)).toContain('comments');
+  });
+
+  it('termina a limpeza de uma exclusão que parou depois de marcar a composição', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [{ integrationId: linkedinId, content: 'Exclusão interrompida' }],
+    });
+    const { id } = created.json as { id: string };
+    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    await prisma.composition.update({ where: { id }, data: { deletedAt: new Date() } });
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(
+      (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).deletedAt
+    ).not.toBeNull();
+  });
+
+  it('não exclui a composição de outra organização, nem depois de marcada como excluída', async () => {
+    const { id } = await prisma.composition.create({
+      data: {
+        organizationId: otherOrgId,
+        status: 'awaiting_approval',
+        format: 'text',
+        publishDate: new Date(future),
+        payload: JSON.stringify({ targets: [{ integrationId: foreignIntegrationId, content: 'x' }] }),
+      },
+      select: { id: true },
+    });
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(404);
+    await prisma.composition.update({ where: { id }, data: { deletedAt: new Date() } });
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(404);
+    expect((await api('DELETE', `/compositions/${randomUUID()}`, apiKey)).status).toBe(404);
+  });
+
+  it('reserva a aprovação para uma tentativa por vez', async () => {
+    const { id } = await prisma.composition.create({
+      data: {
+        organizationId: orgId,
+        status: 'awaiting_approval',
+        format: 'text',
+        publishDate: new Date(future),
+        payload: '{}',
+      },
+      select: { id: true },
+    });
+
+    expect((await compositions.claimApproval(orgId, id, 'primeira')).count).toBe(1);
+    expect((await compositions.claimApproval(orgId, id, 'segunda')).count).toBe(0);
+    await prisma.composition.update({
+      where: { id },
+      data: { updatedAt: new Date(Date.now() - 3 * 60 * 1000) },
+    });
+    expect((await compositions.holdApproval(id, 'primeira')).count).toBe(1);
+    expect((await compositions.claimApproval(orgId, id, 'segunda')).count).toBe(0);
+
+    await prisma.composition.update({
+      where: { id },
+      data: { updatedAt: new Date(Date.now() - 3 * 60 * 1000) },
+    });
+    expect((await compositions.claimApproval(orgId, id, 'segunda')).count).toBe(1);
+    expect((await compositions.holdApproval(id, 'primeira')).count).toBe(0);
+    expect((await compositions.finishApproval(id, 'primeira')).count).toBe(0);
+    expect((await compositions.finishApproval(id, 'segunda')).count).toBe(1);
   });
 });

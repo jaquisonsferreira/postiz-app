@@ -12,10 +12,11 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
+import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
-import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
+import { checkPublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ChromiumSlideRenderer } from '@gitroom/nestjs-libraries/compositions/chromium.slide.renderer';
 import {
   buildSlideHtml,
@@ -94,7 +95,8 @@ export class CompositionService {
     private _postsService: PostsService,
     private _mediaService: MediaService,
     private _subscriptionService: SubscriptionService,
-    private _temporalService: TemporalService
+    private _temporalService: TemporalService,
+    private _integrationManager: IntegrationManager
   ) {}
 
   // Same rule as the media routes: credits only count where billing is on
@@ -127,6 +129,16 @@ export class CompositionService {
     const resolved = [];
     for (const target of targets) {
       const integration = await this.availableIntegration(org, target.integrationId);
+      // the comments are published by the provider after the post, so a
+      // channel without comments would publish the post and drop them
+      if (
+        target.comments?.length &&
+        !this._integrationManager.getSocialIntegration(integration.providerIdentifier).comment
+      ) {
+        throw new CompositionValidationError(
+          `Channel ${target.integrationId} (${integration.providerIdentifier}) does not publish comments, remove its comments`
+        );
+      }
       resolved.push({ ...target, providerIdentifier: integration.providerIdentifier });
     }
     return resolved;
@@ -325,7 +337,8 @@ export class CompositionService {
       }
       throw err;
     }
-    const claimed = await this._compositionRepository.claimApproval(org, id);
+    const lease = randomUUID();
+    const claimed = await this._compositionRepository.claimApproval(org, id, lease);
     if (!claimed.count) {
       throw new HttpException(
         `Only a composition awaiting approval can be approved, this one is ${composition.status}`,
@@ -333,8 +346,16 @@ export class CompositionService {
       );
     }
 
-    await this.queuePosts(org, composition.posts);
-    await this._compositionRepository.updateComposition(id, { status: 'scheduled' });
+    // the lease is renewed before each post, so an approval sent again while
+    // this one is still starting publishing workflows waits for it
+    await this.queuePosts(org, composition.posts, async () => {
+      if (!(await this._compositionRepository.holdApproval(id, lease)).count) {
+        throw new HttpException(`Composition ${id} is being approved by another request`, 409);
+      }
+    });
+    if (!(await this._compositionRepository.finishApproval(id, lease)).count) {
+      throw new HttpException(`Composition ${id} is being approved by another request`, 409);
+    }
 
     return this.getComposition(org, id);
   }
@@ -356,9 +377,11 @@ export class CompositionService {
     }
   }
 
+  // Repeatable: a deletion that stopped after marking the composition deleted
+  // removes the posts that were left when it is sent again
   async deleteComposition(org: string, id: string) {
-    const composition = await this._compositionRepository.getCompositionById(id);
-    if (!composition || composition.organizationId !== org) {
+    const composition = await this._compositionRepository.getCompositionForDeletion(org, id);
+    if (!composition) {
       throw new HttpException('Composition not found', 404);
     }
     const targets = (JSON.parse(composition.payload) as CreateCompositionDto).targets.length;
@@ -407,9 +430,15 @@ export class CompositionService {
   private async fetchSafely(url: string, redirects = 0): Promise<globalThis.Response> {
     // the dispatcher pins what DNS answers, but Node never asks DNS for an
     // address written as an IP, so every address, redirects included, is
-    // checked before it is fetched
-    if (process.env.DISABLE_SSRF_PROTECTION !== 'true' && !(await isSafePublicHttpsUrl(url))) {
-      throw new CompositionValidationError(`Could not download ${url}: blocked address`);
+    // checked before it is fetched. A lookup that failed may work on a retry
+    if (process.env.DISABLE_SSRF_PROTECTION !== 'true') {
+      const check = await checkPublicHttpsUrl(url);
+      if (check === 'unresolved') {
+        throw new Error(`Could not download ${url}: the address could not be resolved`);
+      }
+      if (check === 'blocked') {
+        throw new CompositionValidationError(`Could not download ${url}: blocked address`);
+      }
     }
     let response: globalThis.Response;
     try {
@@ -491,6 +520,7 @@ export class CompositionService {
     id: string,
     index: number,
     organization: Organization,
+    size: SlideSize,
     background: NonNullable<CreateCompositionDto['slides']>[number]['background']
   ): Promise<string | undefined> {
     if (!background) {
@@ -510,7 +540,7 @@ export class CompositionService {
       background.prompt as string,
       organization,
       false,
-      true
+      size.height > size.width
     );
     if (!b64) {
       throw new CompositionValidationError('The image generator returned no image');
@@ -556,6 +586,7 @@ export class CompositionService {
               id,
               index,
               composition.organization,
+              size,
               slide.background
             ),
           });
@@ -611,13 +642,14 @@ export class CompositionService {
   // workflow did not start never holds the others back. Only drafts are
   // queued: a retry that runs after a post was published never queues it again.
   // changePostStatus queues the first post of a thread; the rest is published
-  // from it, so its posts only follow the state
+  // from it, so its posts only follow the state. They are queued before the
+  // workflow starts: one that publishes a reply at once is never overwritten
   private async queuePosts(
     organizationId: string,
     posts: CompositionPost[],
     hold: () => Promise<void> = async () => undefined
   ) {
-    const started: CompositionPost[] = [];
+    const started: { post: CompositionPost; replies: string[] }[] = [];
     for (const post of posts) {
       await hold();
       const existing = await this._postsService.getPostById(post.postId, organizationId);
@@ -629,7 +661,6 @@ export class CompositionService {
       if (existing.state !== 'DRAFT') {
         continue;
       }
-      await this._postsService.changePostStatus(organizationId, post.postId, 'schedule');
       const [, ...thread] = await this._postsService.getPostsRecursively(
         post.postId,
         false,
@@ -639,13 +670,16 @@ export class CompositionService {
       for (const reply of thread) {
         await this._postsService.changeState(reply.id, 'QUEUE');
       }
-      started.push(post);
+      await this._postsService.changePostStatus(organizationId, post.postId, 'schedule');
+      started.push({ post, replies: thread.map((reply) => reply.id) });
     }
 
     const missing: CompositionPost[] = [];
-    for (const post of started) {
+    for (const { post, replies } of started) {
       if (!(await this.publishingStarted(post.postId))) {
-        await this._postsService.changeState(post.postId, 'DRAFT');
+        for (const id of [post.postId, ...replies]) {
+          await this._postsService.changeState(id, 'DRAFT');
+        }
         missing.push(post);
       }
     }
