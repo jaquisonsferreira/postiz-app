@@ -1,14 +1,19 @@
-import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
+import {
+  PrismaRepository,
+  PrismaService,
+} from '@gitroom/nestjs-libraries/database/prisma/prisma.service';
+import { CompositionRepository } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.repository';
 
 const API_URL = process.env.E2E_API_URL || 'http://localhost:3000';
 const UPLOAD_DIRECTORY = process.env.UPLOAD_DIRECTORY as string;
 const TEMPORAL_UI_URL = process.env.E2E_TEMPORAL_UI_URL || 'http://localhost:8080';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaService();
+const compositions = new CompositionRepository(new PrismaRepository<'composition'>(prisma));
 
 interface CompositionResponse {
   id: string;
@@ -449,6 +454,22 @@ describe('Composições pela API pública', () => {
     expect(
       (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).state
     ).toBe('DRAFT');
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+  });
+  it('não devolve à renderização uma composição que já foi agendada', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [{ integrationId: linkedinId, content: 'Já agendada' }],
+    });
+    const { id } = created.json as { id: string };
+    await waitForStatus(apiKey, id, ['awaiting_approval']);
+
+    expect((await compositions.claimRendering(id)).count).toBe(0);
+    const { json } = await api('GET', `/compositions/${id}`, apiKey);
+    expect((json as CompositionResponse).status).toBe('awaiting_approval');
 
     expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
   });

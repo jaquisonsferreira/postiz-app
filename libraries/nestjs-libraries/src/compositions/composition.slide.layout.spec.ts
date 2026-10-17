@@ -1,4 +1,5 @@
 import { Browser, chromium } from 'playwright-core';
+import sharp from 'sharp';
 import {
   buildSlideHtml,
   DEFAULT_BRAND,
@@ -61,5 +62,38 @@ describe('layout do slide', () => {
     expect(kicker!.x + kicker!.width).toBeLessThanOrEqual(size.width);
     expect(brand!.x + brand!.width).toBeLessThanOrEqual(size.width);
     expect(text!.x + text!.width).toBeLessThanOrEqual(size.width);
+  });
+  it('mantém um logo muito largo dentro do espaço da marca', async () => {
+    const size = SIZES[0];
+    const wide = await sharp({
+      create: { width: 4000, height: 50, channels: 3, background: '#000000' },
+    })
+      .png()
+      .toBuffer();
+    const page = await browser.newPage({ viewport: size, javaScriptEnabled: false });
+    await page.route('**/*', (route) =>
+      route.request().url().startsWith('data:') ? route.continue() : route.abort()
+    );
+    await page.setContent(
+      buildSlideHtml({
+        slide: longest,
+        index: 0,
+        total: 5,
+        size,
+        brand: {
+          ...DEFAULT_BRAND,
+          name: 'connectabil',
+          logo: `data:image/png;base64,${wide.toString('base64')}`,
+        },
+      }),
+      { waitUntil: 'load' }
+    );
+
+    const logo = await page.locator('.logo').boundingBox();
+    const kicker = await page.locator('.kicker').boundingBox();
+    await page.close();
+
+    expect(logo!.x).toBeGreaterThanOrEqual(kicker!.x + kicker!.width);
+    expect(logo!.x + logo!.width).toBeLessThanOrEqual(size.width);
   });
 });
