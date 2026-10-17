@@ -71,6 +71,10 @@ const postsQueueKey = (organizationId: string): string =>
   `composition:posts-queue:${organizationId}`;
 const aiCreditsKey = (organizationId: string): string =>
   `composition:ai-credits:${organizationId}`;
+// The holder is compared and the lock changed in one step, so a lock that
+// expired and was taken by another composition is never renewed or deleted
+const RENEW_LOCK = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) end return 0`;
+const RELEASE_LOCK = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0`;
 
 const POSTS_LIMIT_MESSAGE =
   'You have reached the maximum number of posts for your subscription. Please upgrade your subscription to add more posts.';
@@ -129,8 +133,12 @@ export class CompositionService {
         organizationId,
         true
       );
+      // a reply an attempt that stopped already queued is counted in the
+      // posts of the month, so only what is still a draft is added
       if (root && !root.deletedAt && root.state === 'DRAFT') {
-        needed += 1 + thread.length;
+        needed += [root, ...thread].filter(
+          (member) => !member.deletedAt && member.state === 'DRAFT'
+        ).length;
       }
     }
     if (!needed) {
@@ -172,15 +180,12 @@ export class CompositionService {
     }
     try {
       return await run(async () => {
-        if ((await ioRedis.get(key)) !== token) {
+        if (!(await ioRedis.eval(RENEW_LOCK, 1, key, token, lock.seconds))) {
           throw new Error(`The lock ${key} was taken by another composition`);
         }
-        await ioRedis.expire(key, lock.seconds);
       });
     } finally {
-      if ((await ioRedis.get(key)) === token) {
-        await ioRedis.del(key);
-      }
+      await ioRedis.eval(RELEASE_LOCK, 1, key, token);
     }
   }
 
@@ -217,7 +222,10 @@ export class CompositionService {
     drafts: Awaited<ReturnType<CompositionService['storedDraft']>>['post'][]
   ) {
     for (const draft of drafts) {
-      await this.availableIntegration(org, draft.integration.id);
+      this.assertComments(
+        await this.availableIntegration(org, draft.integration.id),
+        draft.value.length > 1
+      );
     }
     await this.assertValid(org, drafts);
   }
@@ -240,20 +248,27 @@ export class CompositionService {
     return integration;
   }
 
+  // the comments are published by the provider after the post, so a channel
+  // without comments would publish the post and drop them
+  private assertComments(
+    integration: { id: string; providerIdentifier: string },
+    hasComments: boolean
+  ) {
+    if (
+      hasComments &&
+      !this._integrationManager.getSocialIntegration(integration.providerIdentifier).comment
+    ) {
+      throw new CompositionValidationError(
+        `Channel ${integration.id} (${integration.providerIdentifier}) does not publish comments, remove its comments`
+      );
+    }
+  }
+
   private async resolveTargets(org: string, targets: CreateCompositionDto['targets']) {
     const resolved = [];
     for (const target of targets) {
       const integration = await this.availableIntegration(org, target.integrationId);
-      // the comments are published by the provider after the post, so a
-      // channel without comments would publish the post and drop them
-      if (
-        target.comments?.length &&
-        !this._integrationManager.getSocialIntegration(integration.providerIdentifier).comment
-      ) {
-        throw new CompositionValidationError(
-          `Channel ${target.integrationId} (${integration.providerIdentifier}) does not publish comments, remove its comments`
-        );
-      }
+      this.assertComments(integration, !!target.comments?.length);
       resolved.push({ ...target, providerIdentifier: integration.providerIdentifier });
     }
     return resolved;
@@ -617,7 +632,9 @@ export class CompositionService {
     if (cached) {
       return cached;
     }
-    const b64 = await this.withBillingLock(
+    // looked up again and saved while the lock is held: another attempt that
+    // generated this slide while this one waited is reused, not paid twice
+    return this.withBillingLock(
       aiCreditsKey(organization.id),
       {
         seconds: AI_CREDITS_LOCK_SECONDS,
@@ -626,11 +643,16 @@ export class CompositionService {
           new Error(`Composition ${id} waits for the AI credits of its organization`),
       },
       async () => {
+        const generated = await ioRedis.get(backgroundKey(id, index));
+        if (generated) {
+          return generated;
+        }
         if (!(await this.hasImageCredits(organization, 1))) {
           throw new CompositionValidationError('Not enough AI image credits for the backgrounds');
         }
+        let b64: string | undefined;
         try {
-          return await this._mediaService.generateImage(
+          b64 = await this._mediaService.generateImage(
             background.prompt as string,
             organization,
             false,
@@ -644,14 +666,14 @@ export class CompositionService {
           }
           throw err;
         }
+        if (!b64) {
+          throw new CompositionValidationError('The image generator returned no image');
+        }
+        const image = `data:image/png;base64,${b64}`;
+        await ioRedis.set(backgroundKey(id, index), image, 'EX', BACKGROUND_CACHE_SECONDS);
+        return image;
       }
     );
-    if (!b64) {
-      throw new CompositionValidationError('The image generator returned no image');
-    }
-    const image = `data:image/png;base64,${b64}`;
-    await ioRedis.set(backgroundKey(id, index), image, 'EX', BACKGROUND_CACHE_SECONDS);
-    return image;
   }
 
   // Each slide is saved as soon as it is rendered, so a retry starts at the
