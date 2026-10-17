@@ -76,6 +76,35 @@ class SlideHasContent implements ValidatorConstraintInterface {
   }
 }
 
+const MAX_SETTINGS_LENGTH = 20000;
+const MAX_SETTINGS_DEPTH = 10;
+
+// Stops at the limit, so a body nested thousands of levels deep is refused
+// before anything walks or serializes it whole
+const withinDepth = (value: unknown, levels: number): boolean =>
+  !value ||
+  typeof value !== 'object' ||
+  (levels > 0 && Object.values(value).every((child) => withinDepth(child, levels - 1)));
+
+// The settings are free-form for each provider, so only their weight is
+// bounded: they are stored on the composition and sent to the provider checks
+@ValidatorConstraint({ name: 'boundedSettings' })
+class BoundedSettings implements ValidatorConstraintInterface {
+  validate(settings: unknown): boolean {
+    if (settings === undefined) {
+      return true;
+    }
+    return (
+      withinDepth(settings, MAX_SETTINGS_DEPTH) &&
+      JSON.stringify(settings).length <= MAX_SETTINGS_LENGTH
+    );
+  }
+
+  defaultMessage(): string {
+    return `settings must be at most ${MAX_SETTINGS_LENGTH} characters as JSON and ${MAX_SETTINGS_DEPTH} levels deep`;
+  }
+}
+
 export class CompositionBackgroundDto {
   @IsIn(['ai', 'url'])
   type: 'ai' | 'url';
@@ -174,6 +203,7 @@ export class CompositionTargetDto {
 
   @IsOptional()
   @IsObject()
+  @Validate(BoundedSettings)
   settings?: Record<string, unknown>;
 }
 

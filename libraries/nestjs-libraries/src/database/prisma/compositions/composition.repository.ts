@@ -86,6 +86,22 @@ export class CompositionRepository {
     });
   }
 
+  // Deletion reads the record even after it was marked deleted, so a deletion
+  // that stopped before removing the posts can be sent again
+  getCompositionForDeletion(org: string, id: string) {
+    return this._composition.model.composition.findFirst({
+      where: {
+        id,
+        organizationId: org,
+      },
+      select: {
+        id: true,
+        payload: true,
+        posts: true,
+      },
+    });
+  }
+
   // A deleted or failed composition is never written again, so an activity
   // that was still running (deleted, or timed out and failed) learns it from the count
   updateComposition(
@@ -262,7 +278,7 @@ export class CompositionRepository {
   // One approval at a time: an "approving" composition can be claimed again
   // only once the approval holding it has been silent for two minutes, so an
   // approval that stopped halfway can be sent again but two at once can't run
-  claimApproval(org: string, id: string) {
+  claimApproval(org: string, id: string, lease: string) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
@@ -270,11 +286,41 @@ export class CompositionRepository {
         deletedAt: null,
         OR: [
           { status: 'awaiting_approval' },
-          { status: 'approving', updatedAt: { lt: new Date(Date.now() - 2 * 60 * 1000) } },
+          { status: 'approving', updatedAt: { lt: new Date(Date.now() - SCHEDULING_LEASE_MS) } },
         ],
       },
       data: {
         status: 'approving',
+        schedulingLease: lease,
+      },
+    });
+  }
+
+  holdApproval(id: string, lease: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: 'approving',
+        schedulingLease: lease,
+      },
+      data: {
+        schedulingLease: lease,
+      },
+    });
+  }
+
+  finishApproval(id: string, lease: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: 'approving',
+        schedulingLease: lease,
+      },
+      data: {
+        status: 'scheduled',
+        error: null,
       },
     });
   }

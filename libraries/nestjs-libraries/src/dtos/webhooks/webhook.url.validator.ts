@@ -59,55 +59,58 @@ export function isBlockedIp(ip: string): boolean {
   return true;
 }
 
-export async function isSafePublicHttpsUrl(value: unknown): Promise<boolean> {
+// "unresolved" is a lookup that failed (a resolver timeout, EAI_AGAIN): the
+// same URL may resolve on a retry, while "blocked" never becomes safe
+export type PublicHttpsUrlCheck = 'safe' | 'blocked' | 'unresolved';
+
+export async function checkPublicHttpsUrl(value: unknown): Promise<PublicHttpsUrlCheck> {
   if (typeof value !== 'string' || !value.trim()) {
-    return false;
+    return 'blocked';
   }
 
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    return false;
+    return 'blocked';
   }
 
   if (parsed.protocol !== 'https:') {
-    return false;
+    return 'blocked';
   }
 
   if (!parsed.hostname) {
-    return false;
+    return 'blocked';
   }
 
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
   if (hostname === 'localhost') {
-    return false;
+    return 'blocked';
   }
 
   // If user supplied a literal IP directly, validate it immediately
   const literalIpVersion = net.isIP(hostname);
   if (literalIpVersion) {
-    return !isBlockedIp(hostname);
+    return isBlockedIp(hostname) ? 'blocked' : 'safe';
   }
 
+  let records: { address: string }[];
   try {
-    const records = await dns.lookup(hostname, { all: true });
-
-    if (!records.length) {
-      return false;
-    }
-
-    for (const record of records) {
-      if (isBlockedIp(record.address)) {
-        return false;
-      }
-    }
-
-    return true;
+    records = await dns.lookup(hostname, { all: true });
   } catch {
-    return false;
+    return 'unresolved';
   }
+
+  if (!records.length) {
+    return 'unresolved';
+  }
+
+  return records.some((record) => isBlockedIp(record.address)) ? 'blocked' : 'safe';
+}
+
+export async function isSafePublicHttpsUrl(value: unknown): Promise<boolean> {
+  return (await checkPublicHttpsUrl(value)) === 'safe';
 }
 
 @ValidatorConstraint({ name: 'IsSafeWebhookUrl', async: true })
