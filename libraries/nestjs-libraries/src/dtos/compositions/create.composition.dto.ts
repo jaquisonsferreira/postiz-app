@@ -29,6 +29,8 @@ export const SLIDE_THEMES = ['accent', 'light', 'dark'] as const;
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const FONT_NAME = /^[A-Za-z0-9 ]{1,60}$/;
 const HTTPS_URL = { protocols: ['https'], require_protocol: true };
+// a text with no visible character becomes an empty post, which no channel publishes
+const HAS_TEXT = /\S/;
 
 const SLIDES_PER_FORMAT: Record<(typeof COMPOSITION_FORMATS)[number], [number, number]> = {
   carousel: [2, 10],
@@ -190,7 +192,7 @@ export class CompositionTargetDto {
 
   @IsDefined()
   @IsString()
-  @MinLength(1)
+  @Matches(HAS_TEXT, { message: 'content must not be empty' })
   @MaxLength(10000)
   content: string;
 
@@ -198,6 +200,7 @@ export class CompositionTargetDto {
   @IsArray()
   @ArrayMaxSize(25)
   @IsString({ each: true })
+  @Matches(HAS_TEXT, { each: true, message: 'comments must not be empty' })
   @MaxLength(10000, { each: true })
   comments?: string[];
 

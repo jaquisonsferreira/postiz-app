@@ -660,7 +660,7 @@ export class CompositionService {
           `The post for channel ${post.integration} was deleted, delete the composition and send it again`
         );
       }
-      if (existing.state !== 'DRAFT') {
+      if (existing.state !== 'DRAFT' && existing.state !== 'QUEUE') {
         continue;
       }
       const [, ...thread] = await this._postsService.getPostsRecursively(
@@ -669,6 +669,12 @@ export class CompositionService {
         organizationId,
         true
       );
+      // queued by an attempt that may have stopped before its workflow
+      // started: it is checked with the others, and returned to draft if not
+      if (existing.state === 'QUEUE') {
+        started.push({ post, replies: thread.map((reply) => reply.id) });
+        continue;
+      }
       for (const reply of thread) {
         await this._postsService.changeState(reply.id, 'QUEUE');
       }
@@ -779,9 +785,8 @@ export class CompositionService {
       if (!(await this._compositionRepository.holdScheduling(id, lease, previous)).count) {
         throw new Error(`Composition ${id} was changed by another attempt`);
       }
-      // a post an earlier attempt created without saving it is a draft in this
-      // channel's group: it is removed so the retry leaves a single post
-      await this._postsService.deletePost(composition.organizationId, compositionGroup(id, target));
+      // the posts of a channel have fixed ids in its group, so a post an earlier
+      // attempt created without saving it is updated here instead of duplicated
       const [created] = (await this._postsService.createPost(
         composition.organizationId,
         { ...body, posts: [post] },
@@ -793,9 +798,18 @@ export class CompositionService {
       const next = JSON.stringify(posts);
       const written = await this._compositionRepository.savePosts(id, lease, previous, next);
       if (!written.count) {
-        // the lease moved to another attempt while this post was created, so
-        // the channel's group may already hold that attempt's saved post: the
-        // draft is left in the group, which the composition's deletion removes
+        // a composition deleted or failed while this post was created was
+        // already cleaned up, so the draft is removed here
+        const current = await this._compositionRepository.getCompositionById(id);
+        if (!current || current.status === 'failed') {
+          await this._postsService.deletePost(
+            composition.organizationId,
+            compositionGroup(id, target)
+          );
+          throw new Error(`Composition ${id} was deleted or failed while its posts were created`);
+        }
+        // the lease moved to another attempt while this post was created: the
+        // posts have the ids that attempt saves, so they are left to it
         this._logger.warn(
           `Composition ${id} lost its scheduling lease, draft ${created.postId} was left unsaved`
         );
