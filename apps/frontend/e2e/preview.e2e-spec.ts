@@ -77,6 +77,14 @@ describe('Pré-visualização interna', () => {
     expect(page.url()).toContain('status=scheduled');
   });
 
+  it('avisa e fecha a prévia quando o post do link não existe mais', async () => {
+    const { page } = session;
+    await page.goto(`${FRONTEND_URL}/posts?status=scheduled&preview=${randomUUID()}`);
+    await page.getByText('Post não encontrado').first().waitFor();
+    await page.waitForURL((url) => !url.searchParams.has('preview'));
+    expect(await modal().count()).toBe(0);
+  });
+
   it('mantém o link público para terceiros validarem', async () => {
     const { page, context } = session;
     await page.goto(`${FRONTEND_URL}/posts?status=scheduled&preview=${group}`);
