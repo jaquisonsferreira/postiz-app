@@ -989,5 +989,16 @@
   "status_connected": "Conectado",
   "delete_channel_button": "Excluir canal",
   "accounts_subtitle": "Redes onde seus posts são publicados. Conecte, reconecte ou desative cada canal.",
-  "no_channels_yet": "Nenhum canal conectado ainda. Adicione um para começar a publicar."
+  "no_channels_yet": "Nenhum canal conectado ainda. Adicione um para começar a publicar.",
+  "create_post_in_editor": "Criar post no editor",
+  "agents_empty_title": "Nenhum agente ativo ainda",
+  "agents_empty_description": "Os agentes vão transformar as pautas do radar de notícias em carrosséis e posts para cada canal e enviá-los para a fila de aprovação.",
+  "agents_empty_step_1": "O radar encontra uma pauta relevante para o seu nicho",
+  "agents_empty_step_2": "O agente escreve os slides e a legenda de cada canal",
+  "agents_empty_step_3": "Você revisa em Aprovações antes do agendamento",
+  "radar_empty_title": "O radar ainda não acompanha fontes",
+  "radar_empty_description": "O radar de notícias vai acompanhar as fontes do seu nicho e sugerir pautas com uma nota de relevância. Até lá, escreva os posts no editor.",
+  "radar_empty_step_1": "Escolha as fontes e os temas para acompanhar",
+  "radar_empty_step_2": "Cada notícia nova recebe uma nota de relevância",
+  "radar_empty_step_3": "As melhores pautas viram rascunhos para os agentes"
 }

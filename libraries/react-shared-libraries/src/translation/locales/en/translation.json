@@ -991,5 +991,16 @@
   "status_connected": "Connected",
   "delete_channel_button": "Delete channel",
   "accounts_subtitle": "Networks where your posts are published. Connect, reconnect or turn off each channel.",
-  "no_channels_yet": "No channel connected yet. Add one to start publishing."
+  "no_channels_yet": "No channel connected yet. Add one to start publishing.",
+  "create_post_in_editor": "Create a post in the editor",
+  "agents_empty_title": "No agent running yet",
+  "agents_empty_description": "Agents will turn the news radar topics into carousels and posts for each channel, and send them to the approval queue.",
+  "agents_empty_step_1": "The radar finds a relevant topic for your niche",
+  "agents_empty_step_2": "The agent writes the slides and the caption of each channel",
+  "agents_empty_step_3": "You review it in Approvals before it is scheduled",
+  "radar_empty_title": "The radar does not follow any source yet",
+  "radar_empty_description": "The news radar will follow the sources of your niche and suggest topics with a relevance score. Until then, write the posts in the editor.",
+  "radar_empty_step_1": "Choose the sources and themes to follow",
+  "radar_empty_step_2": "Each new article gets a relevance score",
+  "radar_empty_step_3": "The best topics become drafts for the agents"
 }
