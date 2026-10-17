@@ -41,7 +41,7 @@ const stored = {
   format: 'carousel',
   publishDate: new Date('2026-10-20T15:00:00.000Z'),
   requiresApproval: true,
-  error: null,
+  error: null as string | null,
   media: [{ id: 'midia', path: 'https://pauta.oriflow.io/uploads/slide.png' }],
   posts: [{ postId: 'post', integration: 'canal', target: 0 }],
   createdAt: new Date('2026-10-17T12:00:00.000Z'),
@@ -253,7 +253,7 @@ describe('ferramentas de composição do MCP', () => {
       CompositionDeleteTool,
     ];
     for (const Tool of tools) {
-      const tool = new Tool(serviceWith({}));
+      const tool: AgentToolInterface = new Tool(serviceWith({}));
       expect(tool.optionalOnSelfHosted).toBe(true);
       expect(tool.mcpOnly).toBeFalsy();
     }

@@ -26,9 +26,10 @@ describe('createOAuthMiddleware com o backend em /api', () => {
     });
     const headers: Record<string, string> = {};
     const res = {
-      writeHead: (_status: number, written: Record<string, string>) =>
-        Object.assign(headers, written),
-      end: () => undefined,
+      writeHead: (_status: number, written: Record<string, string>): void => {
+        Object.assign(headers, written);
+      },
+      end: (): void => undefined,
     } as unknown as http.ServerResponse;
 
     const result = await middleware(

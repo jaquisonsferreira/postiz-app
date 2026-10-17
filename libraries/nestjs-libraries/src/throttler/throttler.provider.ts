@@ -12,8 +12,7 @@ export class ThrottlerBehindProxyGuard extends ThrottlerGuard {
   ): Promise<boolean> {
     const { url, method } = context.switchToHttp().getRequest<Request>();
     if (
-      (method === 'POST' &&
-        (url.includes('/public/v1/posts') || url.includes('/public/v1/compositions'))) ||
+      (method === 'POST' && url.includes('/public/v1/posts')) ||
       isPublicComment(method, url)
     ) {
       return super.canActivate(context);
