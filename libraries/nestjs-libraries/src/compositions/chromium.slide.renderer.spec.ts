@@ -1,4 +1,6 @@
+import { readFileSync } from 'fs';
 import { createServer, Server } from 'http';
+import { join } from 'path';
 import { AddressInfo } from 'net';
 import sharp from 'sharp';
 import { ChromiumSlideRenderer } from '@gitroom/nestjs-libraries/compositions/chromium.slide.renderer';
@@ -39,6 +41,42 @@ describe('ChromiumSlideRenderer', () => {
     expect(metadata.format).toBe('png');
     expect(metadata.width).toBe(1080);
     expect(metadata.height).toBe(1350);
+  });
+
+  it('espera uma fonte remota carregar sem travar no timeout', async () => {
+    const font = readFileSync(join(__dirname, '__fixtures__', 'EricaOne-Regular.ttf'));
+    const fontServer = createServer((req, res) => {
+      setTimeout(() => {
+        res.setHeader('Content-Type', 'font/ttf');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.end(font);
+      }, 300);
+    });
+    await new Promise<void>((resolve) => fontServer.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${(fontServer.address() as AddressInfo).port}`;
+    const fontRenderer = new ChromiumSlideRenderer({
+      executablePath: process.env.CHROMIUM_EXECUTABLE_PATH,
+      allowedOrigins: [origin],
+    });
+
+    try {
+      const html = (family: string) =>
+        page(
+          `<style>@font-face{font-family:Erica;src:url(${origin}/erica.ttf)}p{margin:0;font-size:80px;font-family:${family}}</style><p>Wm</p>`,
+          300,
+          100
+        );
+      const started = Date.now();
+      const withFont = await fontRenderer.render(html('Erica, monospace'), { width: 300, height: 100 });
+      const elapsed = Date.now() - started;
+      const fallback = await fontRenderer.render(html('monospace'), { width: 300, height: 100 });
+
+      expect(elapsed).toBeLessThan(5000);
+      expect(withFont.equals(fallback)).toBe(false);
+    } finally {
+      await fontRenderer.close();
+      await new Promise<void>((resolve) => fontServer.close(() => resolve()));
+    }
   });
 
   it('pinta o conteúdo do HTML', async () => {
