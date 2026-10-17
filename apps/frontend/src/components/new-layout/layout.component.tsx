@@ -151,7 +151,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                           <Title />
                         </div>
                         <div className="flex gap-[12px] items-center text-textItemBlur">
-                          <div className="flex items-center gap-[16px] h-[52px] px-[18px] rounded-full bg-newBgColorInner mobile:hidden">
+                          <div className="flex items-center gap-[16px] mobile:gap-[10px] h-[52px] px-[18px] mobile:px-[12px] rounded-full bg-newBgColorInner">
                             <OrganizationSelector />
                             <div className="hover:text-newTextColor">
                               <ModeComponent />

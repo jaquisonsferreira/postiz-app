@@ -901,10 +901,8 @@
   "good_afternoon": "Good afternoon",
   "good_evening": "Good evening",
   "overview": "Overview",
-  "dashboard_summary": "{{scheduled}} posts scheduled for today · {{pending}} awaiting your approval",
   "see_calendar": "See calendar",
   "create_post": "Create post",
-  "pending_approvals_title": "{{total}} compositions awaiting your approval",
   "pending_approvals_hint": "Review the slides and captions before they are scheduled.",
   "review": "Review",
   "period": "Period",
@@ -1002,5 +1000,9 @@
   "radar_empty_description": "The news radar will follow the sources of your niche and suggest topics with a relevance score. Until then, write the posts in the editor.",
   "radar_empty_step_1": "Choose the sources and themes to follow",
   "radar_empty_step_2": "Each new article gets a relevance score",
-  "radar_empty_step_3": "The best topics become drafts for the agents"
+  "radar_empty_step_3": "The best topics become drafts for the agents",
+  "caption_length": "{{length}} of {{max}} characters",
+  "channel_action_failed": "The channel could not be updated, try again",
+  "pending_approvals_banner": "Compositions awaiting your approval: {{total}}",
+  "dashboard_today_summary": "Scheduled for today: {{scheduled}} · Awaiting approval: {{pending}}"
 }

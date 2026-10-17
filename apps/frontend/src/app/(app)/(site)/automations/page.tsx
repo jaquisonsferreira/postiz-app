@@ -1,4 +1,5 @@
-import { AgentsComponent } from '@gitroom/frontend/components/automation/automation.empty';
+export const dynamic = 'force-dynamic';
+import { AgentsComponent } from '@gitroom/frontend/components/automation/automation.component';
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {

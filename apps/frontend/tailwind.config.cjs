@@ -141,7 +141,6 @@ module.exports = {
       },
       fontFamily: {
         sans: ['Helvetica Neue'],
-        heading: ['var(--font-heading)', 'sans-serif'],
       },
       animation: {
         fade: 'fadeOut 0.5s ease-in-out',

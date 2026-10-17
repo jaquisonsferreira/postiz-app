@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { DashboardComponent } from '@gitroom/frontend/components/dashboard/dashboard.component';
 import { Metadata } from 'next';
 

@@ -160,7 +160,6 @@ export const Filters = () => {
     });
   }, [calendar]);
 
-
   const setCustomer = useCallback(
     (customer: string) => {
       if (calendar.customer === customer) {
@@ -284,7 +283,9 @@ export const Filters = () => {
       {!isListView && (
         <div className="flex flex-grow flex-row items-center gap-[10px] mobile:order-3 mobile:basis-full mobile:min-w-0 mobile:gap-[8px]">
           <div className="h-[56px] p-[6px] gap-[4px] flex items-center rounded-full bg-newBgColorInner mobile:flex-1 mobile:min-w-0">
-            <div
+            <button
+              type="button"
+              aria-label={t('previous', 'Previous')}
               onClick={previous}
               className="cursor-pointer text-textColor rtl:rotate-180 w-[44px] h-[44px] rounded-full flex items-center justify-center hover:bg-newBgColor"
             >
@@ -303,7 +304,7 @@ export const Filters = () => {
                   strokeLinejoin="round"
                 />
               </svg>
-            </div>
+            </button>
             <div className="min-w-[200px] mobile:min-w-0 mobile:flex-1 text-center h-full flex items-center justify-center">
               <div className="px-[9px] mobile:px-[4px] text-[15px] font-[500] capitalize mobile:truncate">
                 <span className="mobile:hidden">{getDisplayText()}</span>
@@ -312,7 +313,9 @@ export const Filters = () => {
                 </span>
               </div>
             </div>
-            <div
+            <button
+              type="button"
+              aria-label={t('next', 'Next')}
               onClick={next}
               className="cursor-pointer text-textColor rtl:rotate-180 w-[44px] h-[44px] rounded-full flex items-center justify-center hover:bg-newBgColor"
             >
@@ -331,16 +334,17 @@ export const Filters = () => {
                   strokeLinejoin="round"
                 />
               </svg>
-            </div>
+            </button>
           </div>
           <div className="flex-1 mobile:flex-none text-[14px] font-[500]">
             <div className="text-center flex h-[56px]">
-              <div
+              <button
+                type="button"
                 onClick={setToday}
                 className="hover:bg-newBgColor px-[22px] flex justify-center items-center rounded-full transition-all cursor-pointer text-[15px] bg-newBgColorInner"
               >
                 {t('today', 'Today')}
-              </div>
+              </button>
             </div>
           </div>
         </div>

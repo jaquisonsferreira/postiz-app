@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { EditorComponent } from '@gitroom/frontend/components/editor/editor.component';
 import { Metadata } from 'next';
 

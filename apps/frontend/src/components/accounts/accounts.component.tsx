@@ -2,9 +2,8 @@
 
 import { FC, useCallback } from 'react';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import { useToaster } from '@gitroom/react/toaster/toaster';
-import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
+import { useRouter } from 'next/navigation';
+import { useChannelActions } from '@gitroom/frontend/components/launches/helpers/use.channel.actions';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useAddProvider } from '@gitroom/frontend/components/launches/add.provider.component';
 import {
@@ -29,44 +28,26 @@ const AccountCard: FC<{
   onChange: () => void;
 }> = ({ channel, canEnable, onChange }) => {
   const t = useT();
-  const fetch = useFetch();
-  const toast = useToaster();
+  const router = useRouter();
   const refreshChannel = useRefreshChannel();
   const needsReconnect = channel.refreshNeeded || channel.inBetweenSteps;
+  const reconnect = useCallback(() => {
+    if (channel.inBetweenSteps && !channel.refreshNeeded) {
+      router.push(`/launches?added=${channel.identifier}&continue=${channel.id}`);
+      return;
+    }
+    refreshChannel(channel)();
+  }, [channel]);
 
-  const setDisabled = useCallback(
-    async (disabled: boolean) => {
-      await fetch(disabled ? '/integrations/disable' : '/integrations/enable', {
-        method: 'POST',
-        body: JSON.stringify({ id: channel.id }),
-      });
-      toast.show(
-        disabled ? t('channel_disabled', 'Channel Disabled') : t('channel_enabled', 'Channel Enabled'),
-        'success'
-      );
-      onChange();
+  const { disable, enable, remove } = useChannelActions(channel.id);
+  const run = useCallback(
+    (action: () => Promise<boolean>) => async () => {
+      if (await action()) {
+        onChange();
+      }
     },
-    [channel.id, onChange]
+    [onChange]
   );
-
-  const remove = useCallback(async () => {
-    if (!(await deleteDialog(t('are_you_sure_delete_channel', 'Are you sure you want to delete this channel?')))) {
-      return;
-    }
-    const response = await fetch('/integrations', {
-      method: 'DELETE',
-      body: JSON.stringify({ id: channel.id }),
-    });
-    if (response.status === 406) {
-      toast.show(
-        t('delete_posts_before_channel', 'You have to delete all the posts associated with this channel before deleting it'),
-        'warning'
-      );
-      return;
-    }
-    toast.show(t('channel_deleted', 'Channel deleted'), 'success');
-    onChange();
-  }, [channel.id, onChange]);
 
   const status = needsReconnect
     ? { label: t('status_reconnect', 'Reconnect'), className: 'bg-statusPendingBg text-statusPendingText' }
@@ -91,19 +72,19 @@ const AccountCard: FC<{
       </div>
       <div className="flex flex-wrap items-center gap-[8px]">
         {needsReconnect ? (
-          <PillButton variant="primary" className="!h-[44px] !text-[15px]" onClick={refreshChannel(channel)}>
+          <PillButton variant="primary" className="!h-[44px] !text-[15px]" onClick={reconnect}>
             {t('reconnect_channel', 'Reconnect channel')}
           </PillButton>
         ) : channel.disabled ? (
-          <PillButton className="!h-[44px] !text-[15px]" disabled={!canEnable} onClick={() => setDisabled(false)}>
+          <PillButton className="!h-[44px] !text-[15px]" disabled={!canEnable} onClick={run(enable)}>
             {t('enable_channel', 'Enable')}
           </PillButton>
         ) : (
-          <PillButton className="!h-[44px] !text-[15px]" onClick={() => setDisabled(true)}>
+          <PillButton className="!h-[44px] !text-[15px]" onClick={run(disable)}>
             {t('disable_channel', 'Disable')}
           </PillButton>
         )}
-        <PillButton className="!h-[44px] !text-[15px] !text-statusErrorText" onClick={remove}>
+        <PillButton className="!h-[44px] !text-[15px] !text-statusErrorText" onClick={run(remove)}>
           {t('delete_channel_button', 'Delete channel')}
         </PillButton>
         <span className="flex-1" />

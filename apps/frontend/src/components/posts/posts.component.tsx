@@ -2,6 +2,7 @@
 
 import { FC, ReactNode, useCallback } from 'react';
 import Link from 'next/link';
+import clsx from 'clsx';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
@@ -11,6 +12,7 @@ import { usePostActions } from '@gitroom/frontend/components/launches/calendar';
 import {
   useCompositions,
   useCompositionSummary,
+  usePendingApprovals,
 } from '@gitroom/frontend/components/approvals/use.compositions';
 import { PostsListState, usePostsList } from '@gitroom/frontend/components/posts/use.posts.list';
 import { CalendarPost, useLocalDate } from '@gitroom/frontend/components/dashboard/use.dashboard';
@@ -34,10 +36,10 @@ const ActionButton: FC<{ label: string; onClick: () => void; children: ReactNode
     data-tooltip-id="tooltip"
     data-tooltip-content={label}
     onClick={onClick}
-    className={
-      'w-[40px] h-[40px] rounded-full flex items-center justify-center bg-newBgColor hover:bg-newBgLineColor ' +
-      (danger ? 'text-statusErrorText' : 'text-newTextColor')
-    }
+    className={clsx(
+      'w-[40px] h-[40px] rounded-full flex items-center justify-center bg-newBgColor hover:bg-newBgLineColor',
+      danger ? 'text-statusErrorText' : 'text-newTextColor'
+    )}
   >
     {children}
   </button>
@@ -110,6 +112,7 @@ const PostsInner: FC = () => {
   const scheduled = usePostsList('scheduled', 1);
   const published = usePostsList('published', 1);
   const pending = useCompositions('awaiting_approval');
+  const pendingTotal = usePendingApprovals();
   const list = usePostsList(listState);
 
   const refresh = useCallback(() => {
@@ -140,7 +143,7 @@ const PostsInner: FC = () => {
             items={[
               { id: 'all', label: t('upcoming', 'Upcoming'), count: all.data?.total ?? 0 },
               { id: 'draft', label: t('drafts', 'Drafts'), count: drafts.data?.total ?? 0 },
-              { id: 'approval', label: t('status_awaiting_approval', 'Awaiting approval'), count: pending.data?.length ?? 0 },
+              { id: 'approval', label: t('status_awaiting_approval', 'Awaiting approval'), count: pendingTotal },
               { id: 'scheduled', label: t('kpi_scheduled', 'Scheduled'), count: scheduled.data?.total ?? 0 },
               { id: 'published', label: t('kpi_published', 'Published'), count: published.data?.total ?? 0 },
             ]}

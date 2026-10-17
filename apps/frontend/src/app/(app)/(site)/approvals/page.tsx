@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { ApprovalsComponent } from '@gitroom/frontend/components/approvals/approvals.component';
 import { Metadata } from 'next';
 

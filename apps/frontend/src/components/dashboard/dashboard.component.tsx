@@ -106,7 +106,7 @@ export const DashboardComponent: FC = () => {
             {greeting}, {firstName}
           </h2>
           <p className="m-0 text-[18px] text-textItemBlur">
-            {t('dashboard_summary', '{{scheduled}} posts scheduled for today · {{pending}} awaiting your approval', {
+            {t('dashboard_today_summary', 'Scheduled for today: {{scheduled}} · Awaiting approval: {{pending}}', {
               scheduled: stats.today.length,
               pending: pendingApprovals,
             })}
@@ -130,7 +130,7 @@ export const DashboardComponent: FC = () => {
           </span>
           <div className="flex-1 min-w-[220px] flex flex-col gap-[4px]">
             <span className="text-[18px] font-[500] text-accentText">
-              {t('pending_approvals_title', '{{total}} compositions awaiting your approval', { total: pendingApprovals })}
+              {t('pending_approvals_banner', 'Compositions awaiting your approval: {{total}}', { total: pendingApprovals })}
             </span>
             <span className="text-[15px] text-newTextColor/80">
               {t('pending_approvals_hint', 'Review the slides and captions before they are scheduled.')}

@@ -48,7 +48,6 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <body
         className={clsx(
           geist.className,
-          geist.variable,
           'light text-primary !bg-primary'
         )}
       >

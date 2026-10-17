@@ -203,12 +203,15 @@ export const TopMenu: FC = () => {
   const { all } = useMenuItem();
   const { isGeneral, billingEnabled } = useVariables();
 
-  // @ts-ignore
-  if (!user?.orgId || (user.tier === 'FREE' && isGeneral && billingEnabled)) {
+  if (!user?.orgId) {
     return null;
   }
+  const contentLocked = user.tier?.current === 'FREE' && isGeneral && billingEnabled;
 
   const visible = all.filter((f) => {
+    if (contentLocked && f.section !== 'settings') {
+      return false;
+    }
     if (f.hide) {
       return false;
     }

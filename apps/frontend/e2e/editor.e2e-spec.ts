@@ -48,7 +48,7 @@ describe('Editor de carrossel', () => {
     const slide = () => page.getByTestId('slide-form');
     await slide().getByLabel('Chamada').fill('Reforma Tributária');
     await slide().getByLabel('Título', { exact: true }).fill('5 pontos para acompanhar');
-    await page.getByRole('button', { name: 'Adicionar slide' }).click();
+    await page.getByRole('tab', { name: '2', exact: true }).click();
     await page.waitForURL(/slide=2/);
     await slide().getByLabel('Título', { exact: true }).fill('O cronograma');
     await slide().getByLabel('Texto').fill('Entre 2026 e 2033.');

@@ -899,10 +899,8 @@
   "good_afternoon": "Boa tarde",
   "good_evening": "Boa noite",
   "overview": "Visão geral",
-  "dashboard_summary": "{{scheduled}} publicações agendadas para hoje · {{pending}} aguardando sua aprovação",
   "see_calendar": "Ver calendário",
   "create_post": "Criar post",
-  "pending_approvals_title": "{{total}} composições aguardando sua aprovação",
   "pending_approvals_hint": "Revise os slides e as legendas antes de agendar.",
   "review": "Revisar",
   "period": "Período",
@@ -1000,5 +998,9 @@
   "radar_empty_description": "O radar de notícias vai acompanhar as fontes do seu nicho e sugerir pautas com uma nota de relevância. Até lá, escreva os posts no editor.",
   "radar_empty_step_1": "Escolha as fontes e os temas para acompanhar",
   "radar_empty_step_2": "Cada notícia nova recebe uma nota de relevância",
-  "radar_empty_step_3": "As melhores pautas viram rascunhos para os agentes"
+  "radar_empty_step_3": "As melhores pautas viram rascunhos para os agentes",
+  "caption_length": "{{length}} de {{max}} caracteres",
+  "channel_action_failed": "Não foi possível atualizar o canal, tente de novo",
+  "pending_approvals_banner": "Composições aguardando sua aprovação: {{total}}",
+  "dashboard_today_summary": "Agendados para hoje: {{scheduled}} · Aguardando aprovação: {{pending}}"
 }

@@ -32,6 +32,7 @@ describe('Contas conectadas', () => {
     await page.goto(`${FRONTEND_URL}/accounts`);
 
     await card('Página Connectabil').getByRole('button', { name: 'Desativar' }).click();
+    await page.getByRole('button', { name: 'Desativar Canal', exact: true }).click();
     await card('Página Connectabil').getByText('Desativado').waitFor();
     expect((await prisma.integration.findUniqueOrThrow({ where: { id: linkedinId } })).disabled).toBe(true);
 
@@ -40,7 +41,7 @@ describe('Contas conectadas', () => {
     expect((await prisma.integration.findUniqueOrThrow({ where: { id: linkedinId } })).disabled).toBe(false);
 
     await card('Página Connectabil').getByRole('button', { name: 'Excluir canal' }).click();
-    await page.getByRole('button', { name: 'Sim, exclua!' }).click();
+    await page.getByRole('button', { name: 'Excluir Canal', exact: true }).click();
     await card('Página Connectabil').waitFor({ state: 'detached' });
     expect((await prisma.integration.findUniqueOrThrow({ where: { id: linkedinId } })).deletedAt).not.toBeNull();
   });

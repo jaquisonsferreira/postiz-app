@@ -11,6 +11,7 @@ import {
   SLIDE_SIZES,
   SlideTheme,
 } from '@gitroom/nestjs-libraries/compositions/composition.slide.template';
+import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositions/composition.errors';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { useLocalDate } from '@gitroom/frontend/components/dashboard/use.dashboard';
 import {
@@ -97,8 +98,11 @@ const SlidePreview: FC<{
           handle: brand.handle || undefined,
         },
       });
-    } catch {
-      return null;
+    } catch (err: unknown) {
+      if (err instanceof CompositionValidationError) {
+        return null;
+      }
+      throw err;
     }
   }, [slide, index, total, dimensions, brand]);
 
@@ -133,24 +137,30 @@ const SlidePreview: FC<{
 
 const ChannelSettings: FC<{
   channel: Channel;
+  caption: string;
   value: Record<string, unknown>;
   onChange: (value: Record<string, unknown>) => void;
-}> = ({ channel, value, onChange }) => {
+}> = ({ channel, caption, value, onChange }) => {
+  const t = useT();
   const { data: schema } = useChannelSettingsSchema(channel.id);
   const fields = editableSettings(schema);
+  const missingDefaults = !!schema && fields.some(([key]) => value[key] === undefined);
 
   useEffect(() => {
-    if (schema) {
+    if (missingDefaults) {
       onChange({ ...defaultSettings(schema), ...value });
     }
-  }, [schema]);
+  }, [missingDefaults, schema, value, onChange]);
 
-  if (!fields.length) {
-    return null;
-  }
+  const tooLong = !!schema?.maxLength && caption.length > schema.maxLength;
 
   return (
-    <div className="flex flex-wrap gap-[12px] ps-[52px]">
+    <div className="flex flex-wrap items-center gap-[12px] ps-[52px]">
+      {!!schema?.maxLength && (
+        <span className={clsx('text-[13px]', tooLong ? 'text-statusErrorText' : 'text-textItemBlur')}>
+          {t('caption_length', '{{length}} of {{max}} characters', { length: caption.length, max: schema.maxLength })}
+        </span>
+      )}
       {fields.map(([key, property]) =>
         property.enum ? (
           <select
@@ -195,7 +205,7 @@ export const EditorComponent: FC = () => {
   const format: Format = FORMATS.includes(search.get('format') as Format) ? (search.get('format') as Format) : 'carousel';
   const size: Size = SIZES.includes(search.get('size') as Size) ? (search.get('size') as Size) : 'portrait';
 
-  const [slides, setSlides] = useState<SlideDraft[]>([emptySlide()]);
+  const [slides, setSlides] = useState<SlideDraft[]>([emptySlide(), emptySlide()]);
   const [brand, setBrand] = useState({ name: '', handle: '', primaryColor: DEFAULT_BRAND.primaryColor });
   const [caption, setCaption] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
@@ -290,6 +300,8 @@ export const EditorComponent: FC = () => {
         return;
       }
       router.push(requiresApproval ? `/approvals?id=${json.id}` : '/launches');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
     }
@@ -498,6 +510,7 @@ export const EditorComponent: FC = () => {
                       {checked && (
                         <ChannelSettings
                           channel={channel}
+                          caption={caption}
                           value={settings[channel.id] || {}}
                           onChange={(value) => setSettings((all) => ({ ...all, [channel.id]: value }))}
                         />

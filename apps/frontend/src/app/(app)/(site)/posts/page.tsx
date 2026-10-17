@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { PostsComponent } from '@gitroom/frontend/components/posts/posts.component';
 import { Metadata } from 'next';
 

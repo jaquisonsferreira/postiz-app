@@ -2,6 +2,7 @@
 
 import { FC, useCallback, useState } from 'react';
 import clsx from 'clsx';
+import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
@@ -12,6 +13,7 @@ import {
   useCompositionActions,
   useCompositions,
   useCompositionSummary,
+  usePendingApprovals,
 } from '@gitroom/frontend/components/approvals/use.compositions';
 import { useLocalDate } from '@gitroom/frontend/components/dashboard/use.dashboard';
 import { Card, CardHeader } from '@gitroom/frontend/components/ui/card';
@@ -154,6 +156,7 @@ export const ApprovalsComponent: FC = () => {
   const pathname = usePathname();
   const search = useSearchParams();
   const { data: queue, isLoading } = useCompositions('awaiting_approval');
+  const pendingTotal = usePendingApprovals();
   const { data: channels = [] } = useIntegrationList();
 
   const selectedId = search.get('id');
@@ -166,7 +169,7 @@ export const ApprovalsComponent: FC = () => {
   const clearSelection = useCallback(() => router.replace(pathname, { scroll: false }), [pathname]);
 
   if (isLoading) {
-    return null;
+    return <LoadingComponent />;
   }
 
   if (!queue?.length) {
@@ -186,7 +189,7 @@ export const ApprovalsComponent: FC = () => {
     <div className="flex-1 flex gap-[20px] items-start mobile:flex-col">
       <Card className="w-[360px] mobile:w-full shrink-0 !p-[16px] !gap-[8px]" testId="approval-queue">
         <div className="px-[12px] pt-[8px] pb-[4px]">
-          <CardHeader title={t('queue', 'Queue')} meta={String(queue.length)} />
+          <CardHeader title={t('queue', 'Queue')} meta={String(pendingTotal)} />
         </div>
         {queue.map((item) => (
           <button
