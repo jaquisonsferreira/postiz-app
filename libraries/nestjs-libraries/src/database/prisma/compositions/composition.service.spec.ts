@@ -80,9 +80,10 @@ const serviceWith = ({
 
 // The in-memory Redis of the tests runs no scripts, so the two the locks send
 // (compare the token, then renew or delete) are run here on its data
+const readRedis = ioRedis.get.bind(ioRedis);
 const redisEval = jest.fn(
   async (script: string, _keys: number, key: string, token: string, seconds?: number) => {
-    if ((await ioRedis.get(key)) !== token) {
+    if ((await readRedis(key)) !== token) {
       return 0;
     }
     return script.includes("'del'") ? ioRedis.del(key) : ioRedis.expire(key, Number(seconds));
@@ -280,10 +281,13 @@ describe('CompositionService', () => {
         integrations: {
           getIntegrationById: jest
             .fn()
-            .mockResolvedValue({ id: 'canal', deletedAt: null, disabled: false }),
+            .mockResolvedValue({ id: 'canal', providerIdentifier: 'x', deletedAt: null, disabled: false }),
         },
         subscriptions: {
           getSubscription: jest.fn().mockResolvedValue(subscription),
+        },
+        manager: {
+          getSocialIntegration: jest.fn().mockReturnValue({ comment: jest.fn() }),
         },
         temporal: {
           getWorkflowHandle: jest.fn().mockResolvedValue({
@@ -837,7 +841,8 @@ describe('CompositionService', () => {
     });
 
     it('para de enfileirar quando a trava passou para outra composição', async () => {
-      jest.spyOn(ioRedis, 'get').mockResolvedValue('de outra composição');
+      // the lock holds another composition's token when this one renews it
+      redisEval.mockResolvedValueOnce(0);
       const { service, changePostStatus } = scheduling();
 
       const error = await service.schedule('composicao').catch((err: unknown) => err);
