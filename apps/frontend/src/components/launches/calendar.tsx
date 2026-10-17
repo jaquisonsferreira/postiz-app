@@ -59,6 +59,7 @@ import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validatio
 import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
 import { Button } from '@gitroom/react/form/button';
 import { ChevronUpIcon } from '@gitroom/frontend/components/ui/icons';
+import { usePostPreview } from '@gitroom/frontend/components/posts/post.preview.modal';
 
 // Extend dayjs with necessary plugins
 extend(isSameOrAfter);
@@ -1234,9 +1235,7 @@ const CalendarItem: FC<{
     user?.impersonate &&
     post.creationMethod &&
     post.creationMethod !== 'UNKNOWN';
-  const preview = useCallback(() => {
-    window.open(`/p/` + post.id + '?share=true', '_blank');
-  }, [post]);
+  const preview = usePostPreview()(post.group);
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',

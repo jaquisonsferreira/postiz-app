@@ -1002,5 +1002,18 @@
   "caption_length": "{{length}} de {{max}} caracteres",
   "channel_action_failed": "Não foi possível atualizar o canal, tente de novo",
   "pending_approvals_banner": "Composições aguardando sua aprovação: {{total}}",
-  "dashboard_today_summary": "Agendados para hoje: {{scheduled}} · Aguardando aprovação: {{pending}}"
+  "dashboard_today_summary": "Agendados para hoje: {{scheduled}} · Aguardando aprovação: {{pending}}",
+  "format_video": "Vídeo",
+  "format_story": "Stories",
+  "preview_network": "Rede",
+  "preview_format": "Formato",
+  "open_share_link": "Abrir link para terceiros",
+  "preview_no_media": "Este post não tem mídia",
+  "preview_send_message": "Enviar mensagem",
+  "preview_like": "Curtir",
+  "preview_comment": "Comentar",
+  "preview_share": "Compartilhar",
+  "preview_repost": "Repostar",
+  "preview_send": "Enviar",
+  "preview_pages": "{{total}} páginas"
 }

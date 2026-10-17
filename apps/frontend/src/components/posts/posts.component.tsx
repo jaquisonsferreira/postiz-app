@@ -20,6 +20,7 @@ import { PillTabs } from '@gitroom/frontend/components/ui/pill.tabs';
 import { StatusPill } from '@gitroom/frontend/components/ui/status.pill';
 import { ChannelIcon } from '@gitroom/frontend/components/ui/channel.icon';
 import { NewPost } from '@gitroom/frontend/components/launches/new.post';
+import { PostPreview, usePostPreview } from '@gitroom/frontend/components/posts/post.preview.modal';
 
 const TABS = ['all', 'draft', 'approval', 'scheduled', 'published'] as const;
 type Tab = (typeof TABS)[number];
@@ -49,6 +50,7 @@ const PostCard: FC<{ post: CalendarPost; onChange: () => void }> = ({ post, onCh
   const t = useT();
   const date = useLocalDate();
   const { editPost, deletePost } = usePostActions(onChange);
+  const preview = usePostPreview();
   const title = stripHtmlValidation('none', post.content || '').trim() || t('no_content', 'no content');
 
   return (
@@ -76,7 +78,7 @@ const PostCard: FC<{ post: CalendarPost; onChange: () => void }> = ({ post, onCh
             <path d="M5 15V5a2 2 0 012-2h10" />
           </svg>
         </ActionButton>
-        <ActionButton label={t('preview', 'Preview')} onClick={() => window.open(`/p/${post.id}?share=true`, '_blank')}>
+        <ActionButton label={t('preview', 'Preview')} onClick={preview(post.group)}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
             <circle cx="12" cy="12" r="3" />
@@ -134,6 +136,7 @@ const PostsInner: FC = () => {
 
   return (
     <div className="flex-1 flex flex-col gap-[20px]">
+      <PostPreview />
       <div className="flex flex-wrap items-center gap-[12px]">
         <div className="flex-1 min-w-0">
           <PillTabs

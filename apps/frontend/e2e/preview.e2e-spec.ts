@@ -73,7 +73,8 @@ describe('Pré-visualização interna', () => {
 
     await page.keyboard.press('Escape');
     await modal().waitFor({ state: 'detached' });
-    expect(page.url()).not.toContain('preview=');
+    await page.waitForURL((url) => !url.searchParams.has('preview'));
+    expect(page.url()).toContain('status=scheduled');
   });
 
   it('mantém o link público para terceiros validarem', async () => {
