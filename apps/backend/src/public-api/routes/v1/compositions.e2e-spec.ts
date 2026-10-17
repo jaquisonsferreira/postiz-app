@@ -473,4 +473,31 @@ describe('Composições pela API pública', () => {
 
     expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
   });
+  it('reserva o agendamento para uma tentativa por vez', async () => {
+    const { id } = await prisma.composition.create({
+      data: {
+        organizationId: orgId,
+        status: 'rendering',
+        format: 'text',
+        publishDate: new Date(future),
+        payload: '{}',
+      },
+      select: { id: true },
+    });
+
+    expect((await compositions.claimScheduling(id, 'primeira')).count).toBe(1);
+    expect((await compositions.claimScheduling(id, 'segunda')).count).toBe(0);
+    expect((await compositions.holdScheduling(id, 'segunda', null)).count).toBe(0);
+    expect((await compositions.savePosts(id, 'segunda', null, '[]')).count).toBe(0);
+    expect((await compositions.holdScheduling(id, 'primeira', null)).count).toBe(1);
+    expect((await compositions.savePosts(id, 'primeira', null, '[]')).count).toBe(1);
+
+    await prisma.composition.update({
+      where: { id },
+      data: { updatedAt: new Date(Date.now() - 3 * 60 * 1000) },
+    });
+    expect((await compositions.claimScheduling(id, 'segunda')).count).toBe(1);
+    expect((await compositions.holdScheduling(id, 'primeira', '[]')).count).toBe(0);
+    expect((await compositions.savePosts(id, 'primeira', '[]', '[]')).count).toBe(0);
+  });
 });
