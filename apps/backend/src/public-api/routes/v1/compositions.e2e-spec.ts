@@ -221,6 +221,30 @@ describe('Composições pela API pública', () => {
     expect((await api('GET', `/compositions/${id}`, apiKey)).status).toBe(404);
   });
 
+  it('registra no status a falha de renderização e permite excluir', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'image',
+      slides: [
+        {
+          headline: 'Fundo em endereço interno',
+          background: { type: 'url', url: 'https://169.254.169.254/latest/meta-data.png' },
+        },
+      ],
+      targets: [{ integrationId: linkedinId, content: 'Imagem' }],
+    });
+    expect(created.status).toBe(201);
+    const { id } = created.json as { id: string };
+
+    const failed = await waitForStatus(apiKey, id, ['failed']);
+    expect(failed.status).toBe('failed');
+    expect(failed.error).toContain('Could not download https://169.254.169.254/latest/meta-data.png');
+    expect(failed.posts).toEqual([]);
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect((await api('GET', `/compositions/${id}`, apiKey)).status).toBe(404);
+  });
+
   it('agenda direto um fio de texto sem aprovação e exclui', async () => {
     const created = await api('POST', '/compositions', apiKey, {
       date: future,
