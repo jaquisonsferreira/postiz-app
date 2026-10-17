@@ -1311,5 +1311,18 @@
   "cli_step_install": "Install the CLI",
   "cli_step_login": "Run: postiz auth:login",
   "cli_step_install_skill": "Install the Postiz skill for your AI agent",
-  "cli_step_set_api_key": "Set your API key as an environment variable"
+  "cli_step_set_api_key": "Set your API key as an environment variable",
+  "format_video": "Video",
+  "format_story": "Stories",
+  "preview_network": "Network",
+  "preview_format": "Format",
+  "open_share_link": "Open link for third parties",
+  "preview_no_media": "This post has no media",
+  "preview_send_message": "Send message",
+  "preview_like": "Like",
+  "preview_comment": "Comment",
+  "preview_share": "Share",
+  "preview_repost": "Repost",
+  "preview_send": "Send",
+  "preview_pages": "{{total}} pages"
 }

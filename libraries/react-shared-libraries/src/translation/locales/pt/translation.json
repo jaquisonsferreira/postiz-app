@@ -1309,5 +1309,18 @@
   "cli_step_install": "Instale a CLI",
   "cli_step_login": "Execute: postiz auth:login",
   "cli_step_install_skill": "Instale a skill do Postiz no seu agente de IA",
-  "cli_step_set_api_key": "Defina sua chave de API como variável de ambiente"
+  "cli_step_set_api_key": "Defina sua chave de API como variável de ambiente",
+  "format_video": "Vídeo",
+  "format_story": "Stories",
+  "preview_network": "Rede",
+  "preview_format": "Formato",
+  "open_share_link": "Abrir link para terceiros",
+  "preview_no_media": "Este post não tem mídia",
+  "preview_send_message": "Enviar mensagem",
+  "preview_like": "Curtir",
+  "preview_comment": "Comentar",
+  "preview_share": "Compartilhar",
+  "preview_repost": "Repostar",
+  "preview_send": "Enviar",
+  "preview_pages": "{{total}} páginas"
 }
