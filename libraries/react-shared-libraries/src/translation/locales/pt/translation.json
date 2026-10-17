@@ -918,5 +918,9 @@
   "active_channels": "Canais ativos",
   "upcoming_posts": "Próximas publicações",
   "no_upcoming_posts": "Nada agendado ainda. Crie um post ou aprove uma composição.",
-  "published_per_week": "Publicados por semana"
+  "published_per_week": "Publicados por semana",
+  "copy_debug": "Copiar depuração",
+  "duplicate": "Duplicar",
+  "calendar_view": "Visão do calendário",
+  "connect_channel": "Conectar um canal"
 }

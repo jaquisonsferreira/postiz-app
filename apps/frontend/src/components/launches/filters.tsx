@@ -2,6 +2,7 @@
 
 import { useCalendar, ListStateFilter } from '@gitroom/frontend/components/launches/calendar.context';
 import clsx from 'clsx';
+import { PillTabs } from '@gitroom/frontend/components/ui/pill.tabs';
 import dayjs from 'dayjs';
 import { useCallback, useState } from 'react';
 import { SelectCustomer } from '@gitroom/frontend/components/launches/select.customer';
@@ -159,19 +160,6 @@ export const Filters = () => {
     });
   }, [calendar]);
 
-  const setCalendarView = useCallback(() => {
-    if (calendar.display !== 'list') {
-      return;
-    }
-
-    const range = getDateRange('week');
-    calendar.setFilters({
-      startDate: range.startDate,
-      endDate: range.endDate,
-      display: 'week',
-      customer: calendar.customer,
-    });
-  }, [calendar]);
 
   const setCustomer = useCallback(
     (customer: string) => {
@@ -295,10 +283,10 @@ export const Filters = () => {
       {/* phones: view switcher and filter first, then the date or list row */}
       {!isListView && (
         <div className="flex flex-grow flex-row items-center gap-[10px] mobile:order-3 mobile:basis-full mobile:min-w-0 mobile:gap-[8px]">
-          <div className="border h-[42px] border-newTableBorder bg-newTableBorder gap-[1px] flex items-center rounded-[8px] overflow-hidden mobile:flex-1 mobile:min-w-0">
+          <div className="h-[56px] p-[6px] gap-[4px] flex items-center rounded-full bg-newBgColorInner mobile:flex-1 mobile:min-w-0">
             <div
               onClick={previous}
-              className="cursor-pointer text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center hover:text-textItemFocused hover:bg-boxFocused"
+              className="cursor-pointer text-textColor rtl:rotate-180 w-[44px] h-[44px] rounded-full flex items-center justify-center hover:bg-newBgColor"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -316,8 +304,8 @@ export const Filters = () => {
                 />
               </svg>
             </div>
-            <div className="min-w-[200px] mobile:min-w-0 mobile:flex-1 text-center bg-newBgColorInner h-full flex items-center justify-center">
-              <div className="py-[3px] px-[9px] mobile:px-[4px] rounded-[5px] transition-all text-[14px] mobile:truncate">
+            <div className="min-w-[200px] mobile:min-w-0 mobile:flex-1 text-center h-full flex items-center justify-center">
+              <div className="px-[9px] mobile:px-[4px] text-[15px] font-[500] capitalize mobile:truncate">
                 <span className="mobile:hidden">{getDisplayText()}</span>
                 <span className="hidden mobile:inline">
                   {getDisplayText(true)}
@@ -326,7 +314,7 @@ export const Filters = () => {
             </div>
             <div
               onClick={next}
-              className="cursor-pointer text-textColor rtl:rotate-180 px-[9px] mobile:px-0 mobile:w-[36px] bg-newBgColorInner h-full flex items-center justify-center hover:text-textItemFocused hover:bg-boxFocused"
+              className="cursor-pointer text-textColor rtl:rotate-180 w-[44px] h-[44px] rounded-full flex items-center justify-center hover:bg-newBgColor"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -346,10 +334,10 @@ export const Filters = () => {
             </div>
           </div>
           <div className="flex-1 mobile:flex-none text-[14px] font-[500]">
-            <div className="text-center flex h-[42px]">
+            <div className="text-center flex h-[56px]">
               <div
                 onClick={setToday}
-                className="hover:text-textItemFocused hover:bg-boxFocused py-[3px] px-[9px] flex justify-center items-center rounded-[8px] transition-all cursor-pointer text-[14px] bg-newBgColorInner border border-newTableBorder"
+                className="hover:bg-newBgColor px-[22px] flex justify-center items-center rounded-full transition-all cursor-pointer text-[15px] bg-newBgColorInner"
               >
                 {t('today', 'Today')}
               </div>
@@ -464,99 +452,22 @@ export const Filters = () => {
           )}
         </div>
       )}
-      <div
-        className={clsx(
-          'flex flex-row p-[4px] border border-newTableBorder rounded-[8px] text-[14px] font-[500] mobile:order-1 mobile:flex-1 mobile:overflow-x-auto',
-          isListView && 'hidden mobile:flex'
-        )}
-      >
-        <div
-          className={clsx(
-            'pt-[6px] pb-[5px] cursor-pointer w-[74px] mobile:w-auto mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
-            calendar.display === 'day' && 'text-textItemFocused bg-boxFocused'
-          )}
-          onClick={setDay}
-        >
-          {t('day', 'Day')}
-        </div>
-        <div
-          className={clsx(
-            'pt-[6px] pb-[5px] cursor-pointer w-[74px] mobile:w-auto mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
-            calendar.display === 'week' && 'text-textItemFocused bg-boxFocused'
-          )}
-          onClick={setWeek}
-        >
-          {t('week', 'Week')}
-        </div>
-        <div
-          className={clsx(
-            'pt-[6px] pb-[5px] cursor-pointer w-[74px] mobile:w-auto mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
-            calendar.display === 'month' && 'text-textItemFocused bg-boxFocused'
-          )}
-          onClick={setMonth}
-        >
-          {t('month', 'Month')}
-        </div>
-        {/* the list toggle joins the view switcher on phones */}
-        <div
-          className={clsx(
-            'hidden mobile:block pt-[6px] pb-[5px] cursor-pointer mobile:flex-1 mobile:min-w-fit mobile:px-[6px] mobile:whitespace-nowrap text-center rounded-[6px]',
-            isListView && 'text-textItemFocused bg-boxFocused'
-          )}
-          onClick={setList}
-        >
-          {t('list', 'List')}
-        </div>
-      </div>
-      <div className="flex flex-row p-[4px] border border-newTableBorder rounded-[8px] text-[14px] font-[500] mobile:hidden">
-        <div
-          onClick={setCalendarView}
-          className={clsx(
-            'pt-[6px] pb-[5px] cursor-pointer flex justify-center items-center w-[34px] text-center rounded-[6px]',
-            !isListView && 'text-textItemFocused bg-boxFocused'
-          )}
-        >
-          {/*calendar*/}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="17"
-            height="19"
-            viewBox="0 0 17 19"
-            fill="none"
-          >
-            <path
-              d="M15.75 7.41667H0.75M11.5833 0.75V4.08333M4.91667 0.75V4.08333M4.75 17.4167H11.75C13.1501 17.4167 13.8502 17.4167 14.385 17.1442C14.8554 16.9045 15.2378 16.522 15.4775 16.0516C15.75 15.5169 15.75 14.8168 15.75 13.4167V6.41667C15.75 5.01654 15.75 4.31647 15.4775 3.78169C15.2378 3.31129 14.8554 2.92883 14.385 2.68915C13.8502 2.41667 13.1501 2.41667 11.75 2.41667H4.75C3.34987 2.41667 2.6498 2.41667 2.11502 2.68915C1.64462 2.92883 1.26217 3.31129 1.02248 3.78169C0.75 4.31647 0.75 5.01654 0.75 6.41667V13.4167C0.75 14.8168 0.75 15.5169 1.02248 16.0516C1.26217 16.522 1.64462 16.9045 2.11502 17.1442C2.6498 17.4167 3.34987 17.4167 4.75 17.4167Z"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
-        <div
-          onClick={setList}
-          className={clsx(
-            'pt-[6px] pb-[5px] flex justify-center items-center cursor-pointer w-[34px] text-center rounded-[6px]',
-            isListView && 'text-textItemFocused bg-boxFocused'
-          )}
-        >
-          {/*list*/}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 20 20"
-            fill="none"
-          >
-            <path
-              d="M17.5 10L7.5 10M17.5 5.00002L7.5 5.00002M17.5 15L7.5 15M4.16667 10C4.16667 10.4603 3.79357 10.8334 3.33333 10.8334C2.8731 10.8334 2.5 10.4603 2.5 10C2.5 9.53978 2.8731 9.16669 3.33333 9.16669C3.79357 9.16669 4.16667 9.53978 4.16667 10ZM4.16667 5.00002C4.16667 5.46026 3.79357 5.83335 3.33333 5.83335C2.8731 5.83335 2.5 5.46026 2.5 5.00002C2.5 4.53978 2.8731 4.16669 3.33333 4.16669C3.79357 4.16669 4.16667 4.53978 4.16667 5.00002ZM4.16667 15C4.16667 15.4603 3.79357 15.8334 3.33333 15.8334C2.8731 15.8334 2.5 15.4603 2.5 15C2.5 14.5398 2.8731 14.1667 3.33333 14.1667C3.79357 14.1667 4.16667 14.5398 4.16667 15Z"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
+      <div className="mobile:order-1 mobile:basis-full mobile:overflow-x-auto">
+        <PillTabs
+          label={t('calendar_view', 'Calendar view')}
+          value={calendar.display}
+          onChange={(view) =>
+            ({ day: setDay, week: setWeek, month: setMonth, list: setList })[
+              view as 'day' | 'week' | 'month' | 'list'
+            ]()
+          }
+          items={[
+            { id: 'month', label: t('month', 'Month') },
+            { id: 'week', label: t('week', 'Week') },
+            { id: 'day', label: t('day', 'Day') },
+            { id: 'list', label: t('list', 'List') },
+          ]}
+        />
       </div>
       {filtersOpen && (
         <BottomSheet

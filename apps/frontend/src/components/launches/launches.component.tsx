@@ -1,5 +1,6 @@
 'use client';
 
+import { PillLink } from '@gitroom/frontend/components/ui/pill.button';
 import {
   AddProviderButton,
   CustomVariables,
@@ -459,53 +460,14 @@ export const MenuComponent: FC<
   );
 };
 export const LaunchesComponent = () => {
-  const fetch = useFetch();
   const user = useUser();
   const { billingEnabled } = useVariables();
-  const router = useRouter();
   const search = useSearchParams();
   const toast = useToaster();
   const fireEvents = useFireEvents();
   const t = useT();
-  const modal = useModals();
-  const [reload, setReload] = useState(false);
-  const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
-  const [channelsOpen, setChannelsOpen] = useState(false);
-  const [mode] = useCookie('mode', DEFAULT_MODE);
-  const { isLoading, data: integrations, mutate } = useIntegrationList();
+  const { isLoading, data: integrations } = useIntegrationList();
 
-  const totalNonDisabledChannels = useMemo(() => {
-    return (
-      integrations?.filter((integration: any) => !integration.disabled)
-        ?.length || 0
-    );
-  }, [integrations]);
-  const changeItemGroup = useCallback(
-    async (id: string, group: string) => {
-      mutate(
-        integrations.map((integration: any) => {
-          if (integration.id === id) {
-            return {
-              ...integration,
-              customer: {
-                id: group,
-              },
-            };
-          }
-          return integration;
-        }),
-        false
-      );
-      await fetch(`/integrations/${id}/group`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          group,
-        }),
-      });
-      mutate();
-    },
-    [integrations]
-  );
   const sortedIntegrations = useMemo(() => {
     return orderBy(
       integrations,
@@ -513,82 +475,6 @@ export const LaunchesComponent = () => {
       ['desc', 'asc', 'asc']
     );
   }, [integrations]);
-  const menuIntegrations = useMemo(() => {
-    return orderBy(
-      Object.values(
-        groupBy(sortedIntegrations, (o) => o?.customer?.id || '')
-      ).map((p) => ({
-        name: (p[0].customer?.name || '') as string,
-        id: (p[0].customer?.id || '') as string,
-        isEmpty: p.length === 0,
-        values: orderBy(
-          p,
-          ['type', 'disabled', 'identifier'],
-          ['desc', 'asc', 'asc']
-        ),
-      })),
-      ['isEmpty', 'name'],
-      ['desc', 'asc']
-    );
-  }, [sortedIntegrations]);
-  const update = useCallback(async (shouldReload: boolean) => {
-    if (shouldReload) {
-      setReload(true);
-    }
-    await mutate();
-    if (shouldReload) {
-      setReload(false);
-    }
-  }, []);
-  const continueIntegration = useCallback(
-    (integration: any) => async () => {
-      router.push(
-        `/launches?added=${integration.identifier}&continue=${integration.id}`
-      );
-    },
-    []
-  );
-  const refreshChannel = useCallback(
-    (
-        integration: Integration & {
-          identifier: string;
-          isCustomFields?: boolean;
-          customFields?: any[];
-        }
-      ) =>
-      async () => {
-        // Custom-fields providers (Bluesky, etc.) have no OAuth URL to redirect
-        // to: reconnect by re-entering the credentials, like the menu does.
-        if (integration.isCustomFields) {
-          modal.openModal({
-            title: t('custom_url', 'Custom URL'),
-            withCloseButton: false,
-            classNames: {
-              modal: 'md',
-            },
-            children: (
-              <CustomVariables
-                identifier={integration.identifier}
-                gotoUrl={(url: string) => router.push(url)}
-                variables={integration.customFields || []}
-              />
-            ),
-          });
-          return;
-        }
-
-        const { url } = await (
-          await fetch(
-            `/integrations/social/${integration.identifier}?refresh=${integration.internalId}`,
-            {
-              method: 'GET',
-            }
-          )
-        ).json();
-        window.location.href = url;
-      },
-    []
-  );
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -617,7 +503,7 @@ export const LaunchesComponent = () => {
       window.close();
     }
   }, []);
-  if (isLoading || reload) {
+  if (isLoading) {
     return (
       <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col gap-[15px] transition-all items-center justify-center">
         <LoadingComponent />
@@ -625,175 +511,29 @@ export const LaunchesComponent = () => {
     );
   }
 
-  // @ts-ignore
   return (
     <DNDProvider>
       <Onboarding />
       <ChannelsAfterPayment integrations={integrations} />
       <HubspotInstalled />
       <CalendarWeekProvider integrations={sortedIntegrations}>
-        {channelsOpen && (
-          <div
-            className="hidden mobile:block fixed inset-0 bg-newBackdrop opacity-60 z-[149]"
-            onClick={() => setChannelsOpen(false)}
-          />
-        )}
-        <div
-          className={clsx(
-            'flex relative flex-col',
-            collapseMenu === '1' && !channelsOpen
-              ? 'group sidebar w-[100px]'
-              : 'w-[260px]',
-            channelsOpen
-              ? 'mobile:fixed mobile:inset-x-0 mobile:bottom-0 mobile:z-[150] mobile:w-full mobile:max-h-[80vh] mobile:rounded-t-[16px] mobile:overflow-hidden'
-              : 'mobile:hidden'
-          )}
-        >
-          <div
-            className={clsx(
-              'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all absolute start-0 top-0 w-full h-full mobile:static mobile:h-auto mobile:max-h-[80vh] mobile:pb-[80px] overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor'
-            )}
-          >
-            <div className="flex items-center">
-              <h2 className="group-[.sidebar]:hidden flex-1 text-[20px] font-[500]">
-                {t('channels')}
-              </h2>
-              <div
-                onClick={() => setChannelsOpen(false)}
-                className="hidden mobile:flex text-btnText bg-btnSimple rounded-[6px] w-[28px] h-[28px] items-center justify-center cursor-pointer select-none"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 12 12"
-                  fill="none"
-                >
-                  <path
-                    d="M1 1L11 11M11 1L1 11"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </div>
-              <div
-                onClick={() =>
-                  setCollapseMenu(collapseMenu === '1' ? '0' : '1')
-                }
-                className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto mobile:hidden text-btnText bg-btnSimple rounded-[6px] w-[24px] h-[24px] flex items-center justify-center cursor-pointer select-none"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="7"
-                  height="13"
-                  viewBox="0 0 7 13"
-                  fill="none"
-                >
-                  <path
-                    d="M6 11.5L1 6.5L6 1.5"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
+        <div className="flex-1 min-w-0 flex flex-col gap-[20px]">
+          <div className="flex flex-wrap items-center gap-[12px]">
+            <div className="flex-1 min-w-0">
+              <Filters />
             </div>
-            <div className="flex flex-col gap-[8px] group-[.sidebar]:mx-auto group-[.sidebar]:w-[44px]">
-              <AddProviderButton update={() => update(true)} />
-              <div className="flex gap-[8px] group-[.sidebar]:flex-col mobile:hidden">
-                {sortedIntegrations?.length > 0 && <NewPost />}
-                {sortedIntegrations?.length > 0 &&
-                  user?.tier?.ai &&
-                  billingEnabled && <GeneratorComponent />}
-              </div>
-            </div>
-            <div className="gap-[32px] flex flex-col select-none flex-1">
-              {sortedIntegrations.length === 0 &&
-                (collapseMenu === '0' || channelsOpen) && (
-                  <div className="flex-1 max-h-[500px] justify-center items-center flex">
-                    <div className="flex flex-col gap-[12px] text-center">
-                      <img
-                        src={
-                          mode === 'dark'
-                            ? '/no-channels.svg'
-                            : '/no-channels-colors.svg'
-                        }
-                        alt="No channels"
-                        className="mx-auto min-w-[100%]"
-                      />
-                      <div className="font-[600] text-[20px]">
-                        {t('no_channels', 'No channels yet')}
-                      </div>
-                      <div className="text-[14px]">
-                        {t('connect_your_accounts')}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              {menuIntegrations.map((menu) => (
-                <MenuGroupComponent
-                  collapsed={collapseMenu === '1' && !channelsOpen}
-                  changeItemGroup={changeItemGroup}
-                  key={menu.name}
-                  group={menu}
-                  mutate={mutate}
-                  continueIntegration={continueIntegration}
-                  update={update}
-                  refreshChannel={refreshChannel}
-                  totalNonDisabledChannels={totalNonDisabledChannels}
-                />
-              ))}
-            </div>
-            <div className="mt-[5px] text-center flex flex-col mobile:hidden">
-              {billingEnabled && user?.isLifetime && (
-                <div>{capitalize(user?.tier?.current || '')} tier</div>
-              )}
-              <div>
-                {process.env.NEXT_PUBLIC_VERSION
-                  ? process.env.NEXT_PUBLIC_VERSION
-                  : ''}
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="bg-newBgColorInner flex-1 min-w-0 flex-col flex p-[20px] mobile:p-[12px] gap-[12px] mobile:min-h-[600px]">
-          <div className="hidden mobile:flex gap-[8px]">
-            <div
-              onClick={() => setChannelsOpen(true)}
-              className="cursor-pointer h-[44px] px-[12px] bg-btnSimple text-btnText rounded-[8px] flex items-center gap-[8px] select-none"
-            >
-              <div className="flex -space-x-[10px] rtl:space-x-reverse">
-                {sortedIntegrations.slice(0, 3).map((integration: any) => (
-                  <ImageWithFallback
-                    key={integration.id}
-                    fallbackSrc={`/icons/platforms/${integration.identifier}.png`}
-                    src={integration.picture}
-                    className="rounded-full border-2 border-btnSimple"
-                    alt={integration.identifier}
-                    width={24}
-                    height={24}
-                  />
-                ))}
-              </div>
-              <div className="text-[14px] font-[500]">
-                {sortedIntegrations.length || t('channels')}
-              </div>
-            </div>
-            {sortedIntegrations?.length > 0 ? (
+            {sortedIntegrations.length > 0 ? (
               <>
-                <NewPost />
                 {user?.tier?.ai && billingEnabled && <GeneratorComponent />}
+                <NewPost />
               </>
             ) : (
-              <div className="flex-1">
-                <AddProviderButton update={() => update(true)} />
-              </div>
+              <PillLink href="/accounts" variant="primary">
+                {t('connect_channel', 'Connect a channel')}
+              </PillLink>
             )}
           </div>
-          <Filters />
-          <div className="flex-1 flex">
+          <div className="flex-1 flex min-h-[600px] bg-newBgColorInner rounded-[32px] p-[20px] mobile:p-[12px]">
             <Calendar />
           </div>
         </div>

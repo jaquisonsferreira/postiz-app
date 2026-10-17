@@ -920,5 +920,9 @@
   "active_channels": "Active channels",
   "upcoming_posts": "Upcoming posts",
   "no_upcoming_posts": "Nothing scheduled yet. Create a post or approve a composition.",
-  "published_per_week": "Published per week"
+  "published_per_week": "Published per week",
+  "copy_debug": "Copy debug",
+  "duplicate": "Duplicate",
+  "calendar_view": "Calendar view",
+  "connect_channel": "Connect a channel"
 }
