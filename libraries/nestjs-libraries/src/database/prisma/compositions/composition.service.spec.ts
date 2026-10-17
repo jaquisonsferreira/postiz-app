@@ -559,6 +559,55 @@ describe('CompositionService', () => {
       expect(deleteMedia).toHaveBeenCalledWith('org', 'midia');
       expect(mockRemoveFile).toHaveBeenCalledWith('/uploads/slide.png');
     }, 60000);
+
+    const failingCheckpoint = (step: 'saveFile' | 'saveMedia', error: Error) => {
+      mockRemoveFile.mockClear();
+      const deleteMedia = jest.fn();
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título' }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+          saveMedia:
+            step === 'saveMedia'
+              ? jest.fn().mockRejectedValue(error)
+              : jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        media: {
+          saveFile:
+            step === 'saveFile'
+              ? jest.fn().mockRejectedValue(error)
+              : jest.fn().mockResolvedValue({ id: 'midia', path: '/uploads/slide.png' }),
+          deleteMedia,
+        },
+      });
+      return { service, deleteMedia };
+    };
+
+    it('remove o arquivo enviado quando a mídia não pôde ser gravada', async () => {
+      const error = new Error('connection terminated');
+      const { service, deleteMedia } = failingCheckpoint('saveFile', error);
+
+      await expect(service.renderMedia('composicao-sem-midia')).rejects.toBe(error);
+
+      expect(mockRemoveFile).toHaveBeenCalledWith('/uploads/slide.png');
+      expect(deleteMedia).not.toHaveBeenCalled();
+    }, 60000);
+
+    it('remove a mídia e o arquivo quando o slide não pôde ser gravado na composição', async () => {
+      const error = new Error('connection terminated');
+      const { service, deleteMedia } = failingCheckpoint('saveMedia', error);
+
+      await expect(service.renderMedia('composicao-sem-checkpoint')).rejects.toBe(error);
+
+      expect(deleteMedia).toHaveBeenCalledWith('org', 'midia');
+      expect(mockRemoveFile).toHaveBeenCalledWith('/uploads/slide.png');
+    }, 60000);
   });
 
   describe('fila de posts da organização com a cobrança ativa', () => {
@@ -1002,6 +1051,62 @@ describe('CompositionService', () => {
       expect((error as Error).message).toContain('does not publish comments');
       expect(claimApproval).not.toHaveBeenCalled();
       expect(changePostStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('rascunho movido para outro canal no painel', () => {
+    it('grava na composição o canal atual de cada post ao aprovar', async () => {
+      const finishApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const draft = {
+        id: 'raiz',
+        integrationId: 'outro-canal',
+        settings: '{}',
+        content: 'Legenda',
+        image: '[]',
+        state: 'DRAFT',
+        deletedAt: null,
+      };
+      const service = serviceWith({
+        repository: {
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimApproval: jest.fn().mockResolvedValue({ count: 1 }),
+          holdApproval: jest.fn().mockResolvedValue({ count: 1 }),
+          finishApproval,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue(draft),
+          getPostsRecursively: jest.fn().mockResolvedValue([draft]),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          changePostStatus: jest.fn(),
+          changeState: jest.fn(),
+        },
+        integrations: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'outro-canal',
+            providerIdentifier: 'x',
+            deletedAt: null,
+            disabled: false,
+          }),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe: jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } }),
+          }),
+        },
+      });
+
+      await service.approveComposition('org', 'composicao');
+
+      expect(finishApproval).toHaveBeenCalledWith(
+        'composicao',
+        expect.any(String),
+        JSON.stringify([{ postId: 'raiz', integration: 'outro-canal', target: 0 }])
+      );
     });
   });
 });
