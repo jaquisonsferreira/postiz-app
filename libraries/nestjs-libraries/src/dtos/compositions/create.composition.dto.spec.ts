@@ -140,4 +140,10 @@ describe('CreateCompositionDto', () => {
     expect(await errorsOf(payload({ format: 'text', slides: 'invalid' }))).toContain('slides');
     expect(await errorsOf(payload({ slides: 'invalid' }))).toContain('slides');
   });
+
+  it('exige que o fundo do slide seja um objeto', async () => {
+    expect(
+      await errorsOf(payload({ slides: [{ ...slide(1), background: [] }, slide(2)] }))
+    ).toContain('slides.0.background');
+  });
 });

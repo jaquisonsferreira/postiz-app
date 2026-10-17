@@ -1,6 +1,7 @@
 import {
   buildCompositionPosts,
   captionToHtml,
+  compositionGroup,
   CompositionPostsInput,
 } from '@gitroom/nestjs-libraries/compositions/composition.posts.builder';
 import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositions/composition.errors';
@@ -69,6 +70,13 @@ describe('buildCompositionPosts', () => {
       post_as_images_carousel: true,
       carousel_name: 'Reforma',
     });
+  });
+
+  it('dá a cada canal um grupo estável, derivado da composição', () => {
+    const body = buildCompositionPosts(input());
+
+    expect(body.posts.map((p) => p.group)).toEqual(['cmp1-0', 'cmp1-1']);
+    expect(compositionGroup('cmp1', 1)).toBe('cmp1-1');
   });
 
   it('anexa as mídias renderizadas ao post principal de cada canal', () => {
