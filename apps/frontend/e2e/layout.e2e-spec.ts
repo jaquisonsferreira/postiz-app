@@ -20,13 +20,24 @@ describe('Layout do Pauta', () => {
     for (const section of ['Conteúdo', 'Automação', 'Configurações']) {
       await sidebar.getByRole('group', { name: section }).waitFor();
     }
-    expect(await sidebar.getByRole('group', { name: 'Automação' }).getByRole('link').count()).toBe(3);
+    expect(await sidebar.getByRole('group', { name: 'Automação' }).getByRole('link').count()).toBe(1);
     await sidebar.getByRole('link', { name: 'Calendário' }).waitFor();
     expect(await sidebar.getByRole('link', { name: 'Calendário' }).getAttribute('aria-current')).toBe('page');
 
     await sidebar.getByRole('link', { name: 'Mídia' }).click();
     await page.waitForURL(`${FRONTEND_URL}/media`);
     expect(await sidebar.getByRole('link', { name: 'Mídia' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('oculta do menu as telas que ainda não funcionam', async () => {
+    const { page } = session;
+    await page.goto(`${FRONTEND_URL}/launches`);
+    const sidebar = page.getByTestId('sidebar');
+    await sidebar.getByRole('link', { name: 'Calendário' }).waitFor();
+
+    for (const name of ['Agentes', 'Radar de notícias', 'Assistente de IA']) {
+      expect(await sidebar.getByRole('link', { name }).count()).toBe(0);
+    }
   });
 
   it('mostra no menu quantas composições aguardam aprovação', async () => {

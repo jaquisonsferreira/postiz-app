@@ -93,6 +93,7 @@ export const useMenuItem = () => {
       section: 'automation',
       name: t('content_agents', 'Agents'),
       path: '/automations',
+      hide: true,
       icon: (
         <Icon>
           <rect x="5" y="8" width="14" height="11" rx="3" />
@@ -104,6 +105,7 @@ export const useMenuItem = () => {
       section: 'automation',
       name: t('news_radar', 'News radar'),
       path: '/radar',
+      hide: true,
       icon: (
         <Icon>
           <circle cx="12" cy="12" r="9" />
@@ -161,6 +163,7 @@ export const useMenuItem = () => {
       section: 'settings',
       name: t('ai_assistant', 'AI assistant'),
       path: '/agents',
+      hide: true,
       icon: (
         <Icon>
           <path d="M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z" />
