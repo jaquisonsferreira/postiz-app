@@ -1,5 +1,6 @@
 import net from 'node:net';
 import { AddressInfo } from 'node:net';
+import { Dispatcher } from 'undici';
 import {
   getSsrfSafeAxios,
   getSsrfSafeDispatcher,
@@ -19,7 +20,9 @@ const startLocalServer = async (): Promise<LocalServer> => {
     count++;
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
-    socket.end('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok');
+    socket.end(
+      'HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok'
+    );
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return {
@@ -31,6 +34,19 @@ const startLocalServer = async (): Promise<LocalServer> => {
         server.close(() => resolve());
       }),
   };
+};
+
+interface DispatcherRequestInit extends RequestInit {
+  dispatcher?: Dispatcher;
+}
+
+const fetchWith = (
+  url: string,
+  dispatcher: Dispatcher | undefined,
+  signal?: AbortSignal
+): Promise<Response> => {
+  const init: DispatcherRequestInit = { dispatcher, signal };
+  return fetch(url, init);
 };
 
 interface ErrorLike {
@@ -83,9 +99,10 @@ describe('ssrf.safe.dispatcher', () => {
     it.each(['http', 'https'])(
       'bloqueia IP literal privado via %s sem abrir conexão',
       async (protocol) => {
-        const error = await fetch(`${protocol}://127.0.0.1:${server.port}/`, {
-          dispatcher: ssrfSafeDispatcher,
-        }).catch((err: unknown) => err);
+        const error = await fetchWith(
+          `${protocol}://127.0.0.1:${server.port}/`,
+          ssrfSafeDispatcher
+        ).catch((err: unknown) => err);
 
         expect(errorChain(error)).toContain('Blocked IP');
         expect(server.connections()).toBe(0);
@@ -93,28 +110,31 @@ describe('ssrf.safe.dispatcher', () => {
     );
 
     it.each(BLOCKED_IP_URLS)('bloqueia %s', async (url) => {
-      const error = await fetch(url, {
-        dispatcher: ssrfSafeDispatcher,
-        signal: AbortSignal.timeout(300),
-      }).catch((err: unknown) => err);
+      const error = await fetchWith(
+        url,
+        ssrfSafeDispatcher,
+        AbortSignal.timeout(300)
+      ).catch((err: unknown) => err);
 
       expect(errorChain(error)).toContain('Blocked IP');
     });
 
     it('bloqueia hostname que resolve para IP privado', async () => {
-      const error = await fetch(`http://localhost:${server.port}/`, {
-        dispatcher: ssrfSafeDispatcher,
-      }).catch((err: unknown) => err);
+      const error = await fetchWith(
+        `http://localhost:${server.port}/`,
+        ssrfSafeDispatcher
+      ).catch((err: unknown) => err);
 
       expect(errorChain(error)).toContain('Blocked IP');
       expect(server.connections()).toBe(0);
     });
 
     it('não bloqueia IP literal público', async () => {
-      const error = await fetch(`http://${UNBLOCKED_IP}:80/`, {
-        dispatcher: ssrfSafeDispatcher,
-        signal: AbortSignal.timeout(300),
-      }).catch((err: unknown) => err);
+      const error = await fetchWith(
+        `http://${UNBLOCKED_IP}:80/`,
+        ssrfSafeDispatcher,
+        AbortSignal.timeout(300)
+      ).catch((err: unknown) => err);
 
       expect(errorChain(error)).not.toContain('Blocked IP');
     });
@@ -128,9 +148,10 @@ describe('ssrf.safe.dispatcher', () => {
     it('permite IP privado quando DISABLE_SSRF_PROTECTION=true', async () => {
       process.env.DISABLE_SSRF_PROTECTION = 'true';
 
-      const response = await fetch(`http://127.0.0.1:${server.port}/`, {
-        dispatcher: getSsrfSafeDispatcher(),
-      });
+      const response = await fetchWith(
+        `http://127.0.0.1:${server.port}/`,
+        getSsrfSafeDispatcher()
+      );
 
       expect(await response.text()).toBe('ok');
       expect(server.connections()).toBe(1);
