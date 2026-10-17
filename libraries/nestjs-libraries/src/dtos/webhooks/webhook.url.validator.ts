@@ -51,6 +51,17 @@ export function isBlockedIp(ip: string): boolean {
     if (mapped) {
       return isBlockedIPv4(mapped[1]);
     }
+    // Same address in hex form (::ffff:7f00:1), as normalized by `new URL()`
+    const mappedHex = ip
+      .toLowerCase()
+      .match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mappedHex) {
+      const high = parseInt(mappedHex[1], 16);
+      const low = parseInt(mappedHex[2], 16);
+      return isBlockedIPv4(
+        [high >> 8, high & 255, low >> 8, low & 255].join('.')
+      );
+    }
     return isBlockedIPv6(ip);
   }
   return true;
