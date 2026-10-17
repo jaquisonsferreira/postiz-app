@@ -27,16 +27,19 @@ export function isBlockedIPv4(ip: string): boolean {
   );
 }
 
+// Checked on the canonical spelling (lowercase, zeros compressed) and on the
+// bits of the first group, so a range holds however the address was written
 export function isBlockedIPv6(ip: string): boolean {
-  const normalized = ip.toLowerCase();
+  if (net.isIP(ip) !== 6) return true;
+  const canonical = new URL(`https://[${ip}]/`).hostname.slice(1, -1);
+  const first = canonical.startsWith('::') ? 0 : parseInt(canonical.split(':')[0], 16);
 
   return (
-    normalized === '::1' ||          // loopback
-    normalized === '::' ||           // unspecified
-    normalized.startsWith('fe80:') || // link-local
-    normalized.startsWith('fc') ||   // unique local fc00::/7
-    normalized.startsWith('fd') ||   // unique local fd00::/7
-    normalized.startsWith('ff')      // multicast
+    canonical === '::1' ||           // loopback
+    canonical === '::' ||            // unspecified
+    (first & 0xffc0) === 0xfe80 ||   // link-local fe80::/10
+    (first & 0xfe00) === 0xfc00 ||   // unique local fc00::/7
+    (first & 0xff00) === 0xff00      // multicast ff00::/8
   );
 }
 

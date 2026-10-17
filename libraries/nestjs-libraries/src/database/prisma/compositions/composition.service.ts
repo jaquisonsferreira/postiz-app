@@ -1,7 +1,7 @@
 import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
 import { Organization } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { TypedSearchAttributes } from '@temporalio/common';
+import { TypedSearchAttributes, WorkflowNotFoundError } from '@temporalio/common';
 import { TemporalService } from 'nestjs-temporal-core';
 import sharp from 'sharp';
 import dayjs from 'dayjs';
@@ -59,6 +59,11 @@ const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024;
 const REMOTE_IMAGE_TIMEOUT_MS = 30000;
 const MAX_REMOTE_REDIRECTS = 3;
 const MAX_PAGE = 10000;
+
+// Long enough for a composition to start the publishing of all its channels
+const POSTS_QUEUE_LOCK_MS = 2 * 60 * 1000;
+const postsQueueKey = (organizationId: string): string =>
+  `composition:posts-queue:${organizationId}`;
 
 const POSTS_LIMIT_MESSAGE =
   'You have reached the maximum number of posts for your subscription. Please upgrade your subscription to add more posts.';
@@ -135,6 +140,32 @@ export class CompositionService {
       dayjs(subscription.createdAt).add(months, 'month').toDate()
     );
     return used + needed <= limit;
+  }
+
+  // The posts of an organization are counted and queued by one composition at
+  // a time, so two of them never both take the last posts of the month. Only
+  // billing limits the posts, so without it nothing waits. The lock is
+  // released only by its holder, never after it expired and another took it
+  private async withPostsQueue<T>(
+    organizationId: string,
+    busy: () => Error,
+    run: () => Promise<T>
+  ): Promise<T> {
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      return run();
+    }
+    const key = postsQueueKey(organizationId);
+    const token = randomUUID();
+    if (!(await ioRedis.set(key, token, 'PX', POSTS_QUEUE_LOCK_MS, 'NX'))) {
+      throw busy();
+    }
+    try {
+      return await run();
+    } finally {
+      if ((await ioRedis.get(key)) === token) {
+        await ioRedis.del(key);
+      }
+    }
   }
 
   private present(
@@ -328,28 +359,38 @@ export class CompositionService {
       }
       throw err;
     }
-    if (!(await this.hasPostsLeft(org, composition.posts))) {
-      throw new HttpException(POSTS_LIMIT_MESSAGE, 402);
-    }
-    const lease = randomUUID();
-    const claimed = await this._compositionRepository.claimApproval(org, id, lease);
-    if (!claimed.count) {
-      throw new HttpException(
-        `Only a composition awaiting approval can be approved, this one is ${composition.status}`,
-        400
-      );
-    }
+    await this.withPostsQueue(
+      org,
+      () =>
+        new HttpException(
+          'Another composition of this organization is being queued, send the approval again',
+          409
+        ),
+      async () => {
+        if (!(await this.hasPostsLeft(org, composition.posts))) {
+          throw new HttpException(POSTS_LIMIT_MESSAGE, 402);
+        }
+        const lease = randomUUID();
+        const claimed = await this._compositionRepository.claimApproval(org, id, lease);
+        if (!claimed.count) {
+          throw new HttpException(
+            `Only a composition awaiting approval can be approved, this one is ${composition.status}`,
+            400
+          );
+        }
 
-    // the lease is renewed before each post, so an approval sent again while
-    // this one is still starting publishing workflows waits for it
-    await this.queuePosts(org, composition.posts, async () => {
-      if (!(await this._compositionRepository.holdApproval(id, lease)).count) {
-        throw new HttpException(`Composition ${id} is being approved by another request`, 409);
+        // the lease is renewed before each post, so an approval sent again while
+        // this one is still starting publishing workflows waits for it
+        await this.queuePosts(org, composition.posts, async () => {
+          if (!(await this._compositionRepository.holdApproval(id, lease)).count) {
+            throw new HttpException(`Composition ${id} is being approved by another request`, 409);
+          }
+        });
+        if (!(await this._compositionRepository.finishApproval(id, lease)).count) {
+          throw new HttpException(`Composition ${id} is being approved by another request`, 409);
+        }
       }
-    });
-    if (!(await this._compositionRepository.finishApproval(id, lease)).count) {
-      throw new HttpException(`Composition ${id} is being approved by another request`, 409);
-    }
+    );
 
     return this.getComposition(org, id);
   }
@@ -612,6 +653,15 @@ export class CompositionService {
         // another attempt saved this slide first: the retry starts again from
         // the stored checkpoint, and stops there if the composition is gone
         if (!written.count) {
+          // its media is on no composition, so nothing else would remove it
+          await this._mediaService.deleteMedia(composition.organizationId, saved.id);
+          try {
+            await this._storage.removeFile(path);
+          } catch (err: unknown) {
+            this._logger.warn(
+              `Could not remove ${path}: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
           throw new Error(`Composition ${id} was changed by another render attempt`);
         }
         await ioRedis.del(backgroundKey(id, index));
@@ -624,19 +674,24 @@ export class CompositionService {
   }
 
   // changePostStatus swallows a failed workflow start, which would leave a
-  // queued post that nothing publishes, so the workflow is looked up after it
+  // queued post that nothing publishes, so the workflow is looked up after it.
+  // Only an answer that it does not exist counts: starting it again over one
+  // that could not be described would restart a publishing in progress
   private async publishingStarted(postId: string): Promise<boolean> {
     try {
       const handle = await this._temporalService.client.getWorkflowHandle(`post_${postId}`);
       const { status } = await handle.describe();
       return status.name === 'RUNNING' || status.name === 'COMPLETED';
     } catch (err: unknown) {
-      this._logger.warn(
-        `No publishing workflow for post ${postId}: ${
+      if (err instanceof WorkflowNotFoundError) {
+        this._logger.warn(`No publishing workflow for post ${postId}: ${err.message}`);
+        return false;
+      }
+      throw new Error(
+        `The publishing of post ${postId} could not be checked: ${
           err instanceof Error ? err.message : String(err)
         }`
       );
-      return false;
     }
   }
 
@@ -703,7 +758,7 @@ export class CompositionService {
   // Every channel is created as a draft and only queued once all of them
   // exist, so a composition that fails while creating them publishes nothing.
   // The step is repeatable: a retry that finds every post saved finishes here
-  private async finishScheduling(
+  private async queueScheduling(
     id: string,
     organizationId: string,
     requiresApproval: boolean,
@@ -740,6 +795,27 @@ export class CompositionService {
     if (!finished.count) {
       throw new Error(`Composition ${id} was changed by another attempt`);
     }
+  }
+
+  // Drafts that wait for an approval take no posts of the month, so only a
+  // composition that queues its posts waits for the organization's queue
+  private async finishScheduling(
+    id: string,
+    organizationId: string,
+    requiresApproval: boolean,
+    posts: CompositionPost[]
+  ) {
+    if (requiresApproval) {
+      return this.queueScheduling(id, organizationId, requiresApproval, posts);
+    }
+    return this.withPostsQueue(
+      organizationId,
+      () =>
+        new Error(
+          `Composition ${id} waits for another composition of its organization to be queued`
+        ),
+      () => this.queueScheduling(id, organizationId, requiresApproval, posts)
+    );
   }
 
   async schedule(id: string): Promise<CompositionPost[]> {
