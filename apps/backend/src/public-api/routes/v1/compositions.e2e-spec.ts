@@ -159,6 +159,41 @@ describe('Composições pela API pública', () => {
     expect(await prisma.composition.count({ where: { organizationId: orgId } })).toBe(0);
   });
 
+  it('recusa na hora configurações inválidas mesmo quando a composição exige aprovação', async () => {
+    const { status, json } = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [{ integrationId: xId, content: 'Sem configuração de respostas' }],
+    });
+    expect(status).toBe(400);
+    expect(JSON.stringify(json)).toContain('who_can_reply_post');
+  });
+
+  it('trata página negativa na listagem como a primeira', async () => {
+    const { status, json } = await api('GET', '/compositions?page=-1', apiKey);
+    expect(status).toBe(200);
+    expect(Array.isArray(json)).toBe(true);
+  });
+
+  it('aceita payload grande dentro dos limites do DTO', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [
+        {
+          integrationId: linkedinId,
+          content: 'x'.repeat(2000),
+          comments: Array.from({ length: 20 }, () => 'y'.repeat(10000)),
+        },
+      ],
+    });
+    expect(created.status).toBe(201);
+    const { id } = created.json as { id: string };
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+  });
+
   it('cria, aprova e exclui um carrossel', async () => {
     const created = await api('POST', '/compositions', apiKey, {
       date: future,

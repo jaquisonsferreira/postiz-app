@@ -135,4 +135,9 @@ describe('CreateCompositionDto', () => {
 
     expect(errors).toEqual(expect.arrayContaining(['size', 'slides.0.theme']));
   });
+
+  it('rejeita slides que não sejam lista, inclusive em post só de texto', async () => {
+    expect(await errorsOf(payload({ format: 'text', slides: 'invalid' }))).toContain('slides');
+    expect(await errorsOf(payload({ slides: 'invalid' }))).toContain('slides');
+  });
 });
