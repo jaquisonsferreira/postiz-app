@@ -1,4 +1,3 @@
-import { Logger } from '@nestjs/common';
 import { Browser, chromium } from 'playwright-core';
 import type { SlideSize } from '@gitroom/nestjs-libraries/compositions/composition.slide.template';
 
@@ -9,23 +8,24 @@ export interface SlideRenderer {
 
 export interface ChromiumSlideRendererOptions {
   executablePath?: string;
-  allowedHosts?: string[];
+  allowedOrigins?: string[];
   timeoutMs?: number;
 }
 
-const DEFAULT_ALLOWED_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
+const DEFAULT_ALLOWED_ORIGINS = ['https://fonts.googleapis.com', 'https://fonts.gstatic.com'];
 
+// Scripts stay disabled, so the wait for the fonts is on the network going
+// idle: the font files are fetched after the stylesheet, before that point.
 // The slide HTML carries user text and is rendered on our servers, so the page
 // may only reach the font CDN: everything else (an <img> pointing at an internal
 // address, a stylesheet on a private host) is aborted before it leaves Chromium
 export class ChromiumSlideRenderer implements SlideRenderer {
-  private readonly _logger = new Logger(ChromiumSlideRenderer.name);
   private _browser: Promise<Browser> | null = null;
-  private readonly _allowedHosts: Set<string>;
+  private readonly _allowedOrigins: Set<string>;
   private readonly _timeoutMs: number;
 
   constructor(private readonly _options: ChromiumSlideRendererOptions = {}) {
-    this._allowedHosts = new Set(_options.allowedHosts || DEFAULT_ALLOWED_HOSTS);
+    this._allowedOrigins = new Set(_options.allowedOrigins || DEFAULT_ALLOWED_ORIGINS);
     this._timeoutMs = _options.timeoutMs || 30000;
   }
 
@@ -49,8 +49,7 @@ export class ChromiumSlideRenderer implements SlideRenderer {
       return true;
     }
     try {
-      const parsed = new URL(url);
-      return parsed.protocol === 'https:' && this._allowedHosts.has(parsed.hostname);
+      return this._allowedOrigins.has(new URL(url).origin);
     } catch {
       return false;
     }
@@ -69,28 +68,13 @@ export class ChromiumSlideRenderer implements SlideRenderer {
       );
       const page = await context.newPage();
       page.setDefaultTimeout(this._timeoutMs);
-      await page.setContent(html, { waitUntil: 'load', timeout: this._timeoutMs });
-      await this.waitForFonts(page);
+      await page.setContent(html, { waitUntil: 'networkidle', timeout: this._timeoutMs });
       return await page.screenshot({
         type: 'png',
         clip: { x: 0, y: 0, width: size.width, height: size.height },
       });
     } finally {
       await context.close();
-    }
-  }
-
-  private async waitForFonts(page: import('playwright-core').Page): Promise<void> {
-    try {
-      await page.waitForFunction(() => document.fonts.status === 'loaded', undefined, {
-        timeout: this._timeoutMs,
-      });
-    } catch (err: unknown) {
-      this._logger.warn(
-        `Fonts did not finish loading, rendering with fallbacks: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
     }
   }
 
