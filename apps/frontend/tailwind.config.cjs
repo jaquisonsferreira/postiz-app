@@ -113,6 +113,16 @@ module.exports = {
         youtubeButton: 'var(--youtube-button)',
         youtubeBgAction: 'var(--youtube-action-color)',
         youtubeSvg: 'var(--youtube-svg-border)',
+        statusScheduledBg: 'var(--status-scheduled-bg)',
+        statusScheduledText: 'var(--status-scheduled-text)',
+        statusPublishedBg: 'var(--status-published-bg)',
+        statusPublishedText: 'var(--status-published-text)',
+        statusPendingBg: 'var(--status-pending-bg)',
+        statusPendingText: 'var(--status-pending-text)',
+        statusDraftBg: 'var(--status-draft-bg)',
+        statusDraftText: 'var(--status-draft-text)',
+        statusErrorBg: 'var(--status-error-bg)',
+        statusErrorText: 'var(--status-error-text)',
       },
       gridTemplateColumns: {
         13: 'repeat(13, minmax(0, 1fr));',
@@ -123,6 +133,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ['Helvetica Neue'],
+        heading: ['var(--font-heading)', 'sans-serif'],
       },
       animation: {
         fade: 'fadeOut 0.5s ease-in-out',

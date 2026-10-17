@@ -879,5 +879,16 @@
   "schedule_all_channels": "Agendar todos os canais",
   "only_channel": "Apenas",
   "hubspot_installed": "O Postiz está instalado no HubSpot",
-  "hubspot_installed_description": "Conecte aqui, no Postiz, os canais em que você deseja publicar. Depois, no HubSpot, abra Agent Hub > Agent Builder, adicione uma ferramenta, escolha Postiz MCP em MCP Servers e clique em Connect and add."
+  "hubspot_installed_description": "Conecte aqui, no Postiz, os canais em que você deseja publicar. Depois, no HubSpot, abra Agent Hub > Agent Builder, adicione uma ferramenta, escolha Postiz MCP em MCP Servers e clique em Connect and add.",
+  "dashboard": "Dashboard",
+  "content_agents": "Agentes",
+  "news_radar": "Radar de notícias",
+  "approvals": "Aprovações",
+  "connected_accounts": "Contas conectadas",
+  "ai_assistant": "Assistente de IA",
+  "automation": "Automação",
+  "configuration": "Configurações",
+  "main_navigation": "Navegação principal",
+  "role_user": "Membro",
+  "role_admin": "Administrador"
 }
