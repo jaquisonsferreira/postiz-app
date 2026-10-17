@@ -54,6 +54,11 @@ const errorChain = (err: unknown): string => {
 };
 
 const UNBLOCKED_IP = '203.0.113.10';
+const BLOCKED_IP_URLS = [
+  'https://169.254.169.254/latest/meta-data',
+  'https://10.0.0.5/',
+  'http://[::1]/',
+];
 
 describe('ssrf.safe.dispatcher', () => {
   let server: LocalServer;
@@ -85,6 +90,15 @@ describe('ssrf.safe.dispatcher', () => {
         expect(server.connections()).toBe(0);
       }
     );
+
+    it.each(BLOCKED_IP_URLS)('bloqueia %s', async (url) => {
+      const error = await fetch(url, {
+        dispatcher: ssrfSafeDispatcher,
+        signal: AbortSignal.timeout(300),
+      }).catch((err: unknown) => err);
+
+      expect(errorChain(error)).toContain('Blocked IP');
+    });
 
     it('bloqueia hostname que resolve para IP privado', async () => {
       const error = await fetch(`http://localhost:${server.port}/`, {
@@ -134,6 +148,14 @@ describe('ssrf.safe.dispatcher', () => {
         expect(server.connections()).toBe(0);
       }
     );
+
+    it.each(BLOCKED_IP_URLS)('bloqueia %s', async (url) => {
+      const error = await getSsrfSafeAxios()
+        .get(url, { proxy: false, timeout: 300 })
+        .catch((err: unknown) => err);
+
+      expect(errorChain(error)).toContain('Blocked IP');
+    });
 
     it('bloqueia hostname que resolve para IP privado', async () => {
       const error = await getSsrfSafeAxios()
