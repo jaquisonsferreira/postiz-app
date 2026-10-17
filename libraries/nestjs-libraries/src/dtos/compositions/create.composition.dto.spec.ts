@@ -150,4 +150,30 @@ describe('CreateCompositionDto', () => {
   it('exige que cada slide seja um objeto', async () => {
     expect(await errorsOf(payload({ slides: [[], []] }))).toContain('slides');
   });
+  it('recusa slide sem texto nem fundo', async () => {
+    expect(await errorsOf(payload({ slides: [{}, slide(2)] }))).toContain('slides');
+    expect(await errorsOf(payload({ slides: [{ headline: '  ' }, slide(2)] }))).toContain(
+      'slides'
+    );
+    expect(
+      await errorsOf(
+        payload({ slides: [{ background: { type: 'ai', prompt: 'escritório' } }, slide(2)] })
+      )
+    ).toEqual([]);
+  });
+
+  it('exige que cada canal seja um objeto', async () => {
+    expect(await errorsOf(payload({ targets: [[]] }))).toContain('targets');
+  });
+
+  it('limita a quantidade e o tamanho das tags', async () => {
+    expect(
+      await errorsOf(
+        payload({ tags: Array.from({ length: 21 }, (_, i) => ({ value: `t${i}`, label: `T${i}` })) })
+      )
+    ).toContain('tags');
+    expect(
+      await errorsOf(payload({ tags: [{ value: 'x'.repeat(101), label: 'y'.repeat(101) }] }))
+    ).toEqual(expect.arrayContaining(['tags.0.value', 'tags.0.label']));
+  });
 });

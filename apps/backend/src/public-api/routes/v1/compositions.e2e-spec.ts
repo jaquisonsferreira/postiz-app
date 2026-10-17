@@ -500,4 +500,28 @@ describe('Composições pela API pública', () => {
     expect((await compositions.holdScheduling(id, 'primeira', '[]')).count).toBe(0);
     expect((await compositions.savePosts(id, 'primeira', '[]', '[]')).count).toBe(0);
   });
+  it('reserva o enfileiramento para uma tentativa por vez', async () => {
+    const { id } = await prisma.composition.create({
+      data: {
+        organizationId: orgId,
+        status: 'scheduling',
+        format: 'text',
+        publishDate: new Date(future),
+        payload: '{}',
+      },
+      select: { id: true },
+    });
+
+    expect((await compositions.claimQueueing(id, 'primeira')).count).toBe(1);
+    expect((await compositions.claimQueueing(id, 'segunda')).count).toBe(0);
+    expect((await compositions.finishQueueing(id, 'segunda', 'scheduled')).count).toBe(0);
+
+    await prisma.composition.update({
+      where: { id },
+      data: { updatedAt: new Date(Date.now() - 3 * 60 * 1000) },
+    });
+    expect((await compositions.claimQueueing(id, 'segunda')).count).toBe(1);
+    expect((await compositions.finishQueueing(id, 'primeira', 'scheduled')).count).toBe(0);
+    expect((await compositions.finishQueueing(id, 'segunda', 'scheduled')).count).toBe(1);
+  });
 });
