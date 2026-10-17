@@ -431,14 +431,17 @@ export class CompositionService {
         // the lease is renewed before each post, so an approval sent again while
         // this one is still starting publishing workflows waits for it. Each
         // draft is checked again right before it is queued, so one edited in
-        // the dashboard while the approval runs is never queued unchecked
+        // the dashboard while the approval runs is never queued unchecked. A
+        // draft moved to another channel there is saved with that channel
+        const posts = composition.posts.map((post) => ({ ...post }));
         try {
-          await this.queuePosts(org, composition.posts, async (post) => {
+          await this.queuePosts(org, posts, async (post) => {
             if (!(await this._compositionRepository.holdApproval(id, lease)).count) {
               throw new HttpException(`Composition ${id} is being approved by another request`, 409);
             }
             await renew();
             const draft = await this.storedDraft(org, post);
+            post.integration = draft.post.integration.id;
             if (draft.state === 'DRAFT') {
               await this.assertPublishable(org, [draft.post]);
             }
@@ -450,7 +453,10 @@ export class CompositionService {
           }
           throw err;
         }
-        if (!(await this._compositionRepository.finishApproval(id, lease)).count) {
+        if (
+          !(await this._compositionRepository.finishApproval(id, lease, JSON.stringify(posts)))
+            .count
+        ) {
           throw new HttpException(`Composition ${id} is being approved by another request`, 409);
         }
       }
@@ -719,31 +725,30 @@ export class CompositionService {
         const path = await this._storage.uploadSimple(
           `data:image/png;base64,${png.toString('base64')}`
         );
-        const saved = await this._mediaService.saveFile(
-          composition.organizationId,
-          path.split('/').pop() as string,
-          path
-        );
-        const previous = media.length ? JSON.stringify(media) : composition.storedMedia;
-        media.push({ id: saved.id, path: saved.path });
-        const written = await this._compositionRepository.saveMedia(
-          id,
-          previous,
-          JSON.stringify(media)
-        );
-        // another attempt saved this slide first: the retry starts again from
-        // the stored checkpoint, and stops there if the composition is gone
-        if (!written.count) {
-          // its media is on no composition, so nothing else would remove it
-          await this._mediaService.deleteMedia(composition.organizationId, saved.id);
-          try {
-            await this._storage.removeFile(path);
-          } catch (err: unknown) {
-            this._logger.warn(
-              `Could not remove ${path}: ${err instanceof Error ? err.message : String(err)}`
-            );
+        let saved: { id: string; path: string } | undefined;
+        try {
+          saved = await this._mediaService.saveFile(
+            composition.organizationId,
+            path.split('/').pop() as string,
+            path
+          );
+          const previous = media.length ? JSON.stringify(media) : composition.storedMedia;
+          const next = [...media, { id: saved.id, path: saved.path }];
+          const written = await this._compositionRepository.saveMedia(
+            id,
+            previous,
+            JSON.stringify(next)
+          );
+          // another attempt saved this slide first: the retry starts again from
+          // the stored checkpoint, and stops there if the composition is gone
+          if (!written.count) {
+            throw new Error(`Composition ${id} was changed by another render attempt`);
           }
-          throw new Error(`Composition ${id} was changed by another render attempt`);
+          media.push(next[next.length - 1]);
+        } catch (err: unknown) {
+          // a slide that is on no composition is never removed by anything else
+          await this.discardSlide(composition.organizationId, path, saved?.id);
+          throw err;
         }
         await ioRedis.del(backgroundKey(id, index));
       }
@@ -752,6 +757,27 @@ export class CompositionService {
     }
 
     return media;
+  }
+
+  // The cleanup of a slide that could not be saved never hides why it failed:
+  // what can't be removed is logged and the caller rethrows the first error
+  private async discardSlide(organizationId: string, path: string, mediaId?: string) {
+    if (mediaId) {
+      try {
+        await this._mediaService.deleteMedia(organizationId, mediaId);
+      } catch (err: unknown) {
+        this._logger.warn(
+          `Could not remove media ${mediaId}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+    try {
+      await this._storage.removeFile(path);
+    } catch (err: unknown) {
+      this._logger.warn(
+        `Could not remove ${path}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   // changePostStatus swallows a failed workflow start, which would leave a

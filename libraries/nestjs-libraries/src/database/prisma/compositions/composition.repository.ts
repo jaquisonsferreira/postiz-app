@@ -345,7 +345,8 @@ export class CompositionRepository {
     });
   }
 
-  finishApproval(id: string, lease: string) {
+  // The posts are saved again with the channel each one was queued on
+  finishApproval(id: string, lease: string, posts: string) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
@@ -356,6 +357,7 @@ export class CompositionRepository {
       data: {
         status: 'scheduled',
         error: null,
+        posts,
       },
     });
   }
