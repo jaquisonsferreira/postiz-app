@@ -151,6 +151,24 @@ export class CompositionRepository {
     });
   }
 
+  // Written only over the value this attempt started from: a stale render
+  // attempt that resumes after a retry already saved more slides writes nothing
+  saveMedia(id: string, previous: string | null, media: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: {
+          not: 'failed',
+        },
+        media: previous,
+      },
+      data: {
+        media,
+      },
+    });
+  }
+
   // One approval at a time: an "approving" composition can be claimed again
   // only once the approval holding it has been silent for two minutes, so an
   // approval that stopped halfway can be sent again but two at once can't run

@@ -54,6 +54,8 @@ const SIZES: Record<NonNullable<CreateCompositionDto['size']>, SlideSize> = {
 
 const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024;
 const REMOTE_IMAGE_TIMEOUT_MS = 30000;
+const MAX_REMOTE_REDIRECTS = 3;
+const MAX_PAGE = 10000;
 
 // Every composition on this worker shares the limit, so a burst of carousels
 // never runs more browsers than the publishing workers can live next to
@@ -206,22 +208,70 @@ export class CompositionService {
 
   async getCompositions(org: string, page: number) {
     const requested = Number(page);
-    const safePage = Number.isFinite(requested) ? Math.max(0, Math.floor(requested)) : 0;
+    const safePage = Number.isFinite(requested)
+      ? Math.min(MAX_PAGE, Math.max(0, Math.floor(requested)))
+      : 0;
     return (await this._compositionRepository.getCompositions(org, safePage)).map((c) =>
       this.present(c)
     );
   }
 
+  // The same provider checks as the scheduling, run on the posts as they are
+  // stored: the dashboard saves a draft without them
+  private async assertValid(
+    organizationId: string,
+    posts: Parameters<PostsService['validatePosts']>[1]
+  ) {
+    const validation = await this._postsService.validatePosts(organizationId, posts);
+    const problems = validation.flatMap((item) => {
+      const reason = !item.valid
+        ? item.settingsError || 'invalid settings'
+        : item.errors !== true
+        ? item.errors
+        : item.emptyContent
+        ? 'the post is empty'
+        : item.tooLong
+        ? `the post is longer than ${item.maximumCharacters} characters`
+        : '';
+      return reason ? [`${item.name} (${item.identifier}): ${reason}`] : [];
+    });
+    if (problems.length) {
+      throw new CompositionValidationError(problems.join('; '));
+    }
+  }
+
   async approveComposition(org: string, id: string) {
     const composition = await this.getComposition(org, id);
+    const stored = [];
     for (const post of composition.posts) {
-      const existing = await this._postsService.getPostById(post.postId, org);
-      if (!existing || existing.deletedAt) {
+      const [root, ...thread] = await this._postsService.getPostsRecursively(
+        post.postId,
+        false,
+        org,
+        true
+      );
+      if (!root || root.deletedAt) {
         throw new HttpException(
           `The post for channel ${post.integration} was deleted, delete the composition and send it again`,
           400
         );
       }
+      stored.push({
+        integration: { id: root.integrationId },
+        settings: JSON.parse(root.settings || '{}'),
+        value: [root, ...thread].map((item) => ({
+          content: item.content,
+          image: JSON.parse(item.image || '[]'),
+        })),
+      });
+    }
+    try {
+      await this.assertValid(org, stored);
+    } catch (err: unknown) {
+      if (err instanceof CompositionValidationError) {
+        throw new HttpException(err.message, 400);
+      }
+      throw err;
     }
     const claimed = await this._compositionRepository.claimApproval(org, id);
     if (!claimed.count) {
@@ -277,7 +327,12 @@ export class CompositionService {
     // Marked deleted first: a scheduling still running in the worker either
     // created its post before this point, and its group is removed here, or
     // its save is refused and it removes the post itself
+    // an edited draft keeps its id but not its group, so both are removed
     await this._compositionRepository.deleteComposition(org, id);
+    await this.deletePosts(
+      org,
+      parseList<CompositionPost>(composition.posts).map((post) => post.postId)
+    );
     await this.deleteChannelPosts(org, id, targets);
     return { id };
   }
@@ -289,17 +344,17 @@ export class CompositionService {
     }
     return {
       ...composition,
+      storedMedia: composition.media,
       body: JSON.parse(composition.payload) as CreateCompositionDto,
       media: parseList<CompositionMedia>(composition.media),
       posts: parseList<CompositionPost>(composition.posts),
     };
   }
 
-  // An answer that can't change (blocked address, 4xx, too large, not an image)
-  // stops the composition; a timeout, a 5xx or a 429 is left to the retries
-  private async remoteImage(url: string): Promise<string> {
+  private async fetchSafely(url: string, redirects = 0): Promise<globalThis.Response> {
     // the dispatcher pins what DNS answers, but Node never asks DNS for an
-    // address written as an IP, so the address itself is checked first
+    // address written as an IP, so every address, redirects included, is
+    // checked before it is fetched
     if (process.env.DISABLE_SSRF_PROTECTION !== 'true' && !(await isSafePublicHttpsUrl(url))) {
       throw new CompositionValidationError(`Could not download ${url}: blocked address`);
     }
@@ -308,6 +363,7 @@ export class CompositionService {
       response = await fetch(url, {
         // @ts-ignore — undici option, not in lib.dom fetch types
         dispatcher: getSsrfSafeDispatcher(),
+        redirect: 'manual',
         signal: AbortSignal.timeout(REMOTE_IMAGE_TIMEOUT_MS),
       });
     } catch (err: unknown) {
@@ -319,6 +375,21 @@ export class CompositionService {
       }
       throw new Error(`Could not download ${url}: ${reason}`);
     }
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location) {
+      await response.body?.cancel();
+      if (redirects >= MAX_REMOTE_REDIRECTS) {
+        throw new CompositionValidationError(`Could not download ${url}: too many redirects`);
+      }
+      return this.fetchSafely(new URL(location, url).toString(), redirects + 1);
+    }
+    return response;
+  }
+
+  // An answer that can't change (blocked address, 4xx, too large, not an image)
+  // stops the composition; a timeout, a 5xx or a 429 is left to the retries
+  private async remoteImage(url: string): Promise<string> {
+    const response = await this.fetchSafely(url);
     if (response.status >= 500 || response.status === 429) {
       await response.body?.cancel();
       throw new Error(`Could not download ${url}: HTTP ${response.status}`);
@@ -439,12 +510,17 @@ export class CompositionService {
             path.split('/').pop() as string,
             path
           );
+          const previous = media.length ? JSON.stringify(media) : composition.storedMedia;
           media.push({ id: saved.id, path: saved.path });
-          const written = await this._compositionRepository.updateComposition(id, {
-            media: JSON.stringify(media),
-          });
+          const written = await this._compositionRepository.saveMedia(
+            id,
+            previous,
+            JSON.stringify(media)
+          );
           if (!written.count) {
-            throw new CompositionValidationError('The composition was deleted');
+            throw new CompositionValidationError(
+              'The composition was deleted, failed or rendered by another attempt'
+            );
           }
           await ioRedis.del(backgroundKey(id, index));
         }
@@ -565,25 +641,7 @@ export class CompositionService {
       tags: composition.body.tags,
     });
 
-    const validation = await this._postsService.validatePosts(
-      composition.organizationId,
-      body.posts
-    );
-    const problems = validation.flatMap((item) => {
-      const reason = !item.valid
-        ? item.settingsError || 'invalid settings'
-        : item.errors !== true
-        ? item.errors
-        : item.emptyContent
-        ? 'the post is empty'
-        : item.tooLong
-        ? `the post is longer than ${item.maximumCharacters} characters`
-        : '';
-      return reason ? [`${item.name} (${item.identifier}): ${reason}`] : [];
-    });
-    if (problems.length) {
-      throw new CompositionValidationError(problems.join('; '));
-    }
+    await this.assertValid(composition.organizationId, body.posts);
 
     // One channel at a time, each post saved on the record as soon as it
     // exists, so a retry skips the channels already saved
@@ -630,6 +688,9 @@ export class CompositionService {
     if (!composition) {
       return;
     }
+    // marked failed before the cleanup: a scheduling attempt still running can
+    // no longer save or queue a post once the cleanup has started
+    await this._compositionRepository.markFailed(id, error);
     const targets = (JSON.parse(composition.payload) as CreateCompositionDto).targets.length;
     const queued: string[] = [];
     for (let target = 0; target < targets; target++) {
@@ -641,11 +702,16 @@ export class CompositionService {
         queued.push(saved!.integration);
         continue;
       }
+      if (existing && !existing.deletedAt) {
+        await this._postsService.deletePost(composition.organizationId, existing.group);
+      }
       await this._postsService.deletePost(composition.organizationId, compositionGroup(id, target));
     }
-    await this._compositionRepository.markFailed(
-      id,
-      queued.length ? `${error}. Already queued and kept: ${queued.join(', ')}` : error
-    );
+    if (queued.length) {
+      await this._compositionRepository.markFailed(
+        id,
+        `${error}. Already queued and kept: ${queued.join(', ')}`
+      );
+    }
   }
 }

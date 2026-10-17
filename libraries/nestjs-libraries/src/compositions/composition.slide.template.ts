@@ -118,14 +118,28 @@ const estimateHeight = (
 
 // Scripts are off in the renderer, so the text can't be measured on the page:
 // the sizes start from the design's and shrink until the estimate fits
+// share of the content width the kicker and the brand get in the top bar,
+// and the handle in the bottom bar
+const KICKER_SHARE = 0.55;
+const BRAND_SHARE = 0.45;
+const HANDLE_SHARE = 0.75;
+const BAR_FONT = 28;
+const BAR_LINE_HEIGHT = 1.25;
+
 export const fitTextSizes = (
   slide: SlideContent,
-  size: SlideSize
+  size: SlideSize,
+  bars: { brand?: string; handle?: string } = {}
 ): { headline: number; body: number } => {
   const scale = size.width / 1080;
   const padding = 88 * scale;
   const width = size.width - padding * 2;
-  const chrome = padding * 2 + 2 * 40 * scale + 2 * 32 * scale;
+  const barFont = BAR_FONT * scale;
+  const barHeight = (text: string | undefined, share: number) =>
+    text ? estimateHeight(text, barFont, BODY_GLYPH, BAR_LINE_HEIGHT, width * share) : barFont * BAR_LINE_HEIGHT;
+  const top = Math.max(barHeight(slide.kicker, KICKER_SHARE), barHeight(bars.brand, BRAND_SHARE));
+  const bottom = barHeight(bars.handle, HANDLE_SHARE);
+  const chrome = padding * 2 + top + bottom + 2 * 32 * scale;
   const available = size.height - chrome;
   const headline = slide.headline || '';
   const startHeadline =
@@ -183,7 +197,7 @@ export const buildSlideHtml = (input: SlideTemplateInput): string => {
     backgroundImage || theme !== 'light' ? brand.lightColor : brand.darkColor;
   const scale = size.width / 1080;
   const padding = Math.round(88 * scale);
-  const fonts = fitTextSizes(slide, size);
+  const fonts = fitTextSizes(slide, size, { brand: input.brand.name, handle: input.brand.handle });
 
   const brandName = input.brand.name ? escapeHtml(input.brand.name) : '';
   const handle = input.brand.handle ? escapeHtml(input.brand.handle) : '';
@@ -204,9 +218,10 @@ body { width: ${size.width}px; height: ${size.height}px; overflow: hidden; }
 .background { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0.78) 100%); }
 .content { position: relative; height: 100%; padding: ${padding}px; display: flex; flex-direction: column; justify-content: space-between; gap: ${Math.round(32 * scale)}px; }
-.top, .bottom { display: flex; align-items: center; justify-content: space-between; gap: ${Math.round(24 * scale)}px; font-size: ${Math.round(28 * scale)}px; font-weight: 700; }
-.kicker { min-width: 0; overflow-wrap: anywhere; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
-.brand { flex-shrink: 0; display: flex; align-items: center; gap: ${Math.round(16 * scale)}px; }
+.top, .bottom { display: flex; align-items: flex-start; justify-content: space-between; gap: ${Math.round(24 * scale)}px; font-size: ${Math.round(28 * scale)}px; font-weight: 700; }
+.kicker { flex: 0 1 ${KICKER_SHARE * 100}%; min-width: 0; overflow-wrap: anywhere; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+.brand { flex: 0 1 auto; max-width: ${BRAND_SHARE * 100}%; min-width: 0; overflow-wrap: anywhere; text-align: right; justify-content: flex-end; display: flex; align-items: center; gap: ${Math.round(16 * scale)}px; }
+.handle { max-width: ${HANDLE_SHARE * 100}%; min-width: 0; }
 .logo { height: ${Math.round(56 * scale)}px; width: auto; }
 .text { min-width: 0; display: flex; flex-direction: column; gap: ${Math.round(32 * scale)}px; margin-top: ${backgroundImage ? 'auto' : '0'}; }
 h1 { margin: 0; font-family: '${brand.headingFont}', sans-serif; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; font-size: ${fonts.headline}px; }
@@ -219,7 +234,7 @@ ${backgroundImage ? `<img class="background" alt="" src="${backgroundImage}">\n<
 <div class="content">
 <div class="top"><span class="kicker">${slide.kicker ? escapeHtml(slide.kicker) : ''}</span><span class="brand">${brand.logo ? `<img class="logo" alt="" src="${brand.logo}">` : ''}${brandName}</span></div>
 <div class="text">${slide.headline ? `<h1>${escapeHtml(slide.headline)}</h1>` : ''}${slide.body ? `<p>${escapeHtml(slide.body)}</p>` : ''}</div>
-<div class="bottom"><span>${handle}</span><span>${position}</span></div>
+<div class="bottom"><span class="handle">${handle}</span><span>${position}</span></div>
 </div>
 </div>
 </body>
