@@ -108,7 +108,7 @@ const Detail: FC<{ composition: Composition; channels: Channel[]; onDone: () => 
             title={t('slides', 'Slides')}
             meta={String(composition.media.length)}
           />
-          <div className="flex gap-[14px] overflow-x-auto pb-[4px]">
+          <div data-testid="approval-slides" className="flex gap-[14px] overflow-x-auto pb-[4px]">
             {composition.media.map((media, index) => (
               <img
                 key={media.id}
@@ -137,7 +137,7 @@ const Detail: FC<{ composition: Composition; channels: Channel[]; onDone: () => 
                 {channel && <ChannelIcon identifier={channel.identifier} picture={channel.picture} name={channel.name} />}
                 <span className="flex-1 min-w-0 flex flex-col gap-[6px]">
                   <span className="text-[15px] font-[500]">{channel?.name || target.integrationId}</span>
-                  <span className="text-[15px] leading-[1.5] whitespace-pre-line text-newTextColor/90">{target.content}</span>
+                  <span className="text-[15px] leading-[1.5] whitespace-pre-line break-words text-newTextColor/90">{target.content}</span>
                 </span>
               </li>
             );
@@ -186,7 +186,7 @@ export const ApprovalsComponent: FC = () => {
   }
 
   return (
-    <div className="flex-1 flex gap-[20px] items-start mobile:flex-col">
+    <div className="flex-1 min-w-0 flex gap-[20px] items-start mobile:flex-col">
       <Card className="w-[360px] mobile:w-full shrink-0 !p-[16px] !gap-[8px]" testId="approval-queue">
         <div className="px-[12px] pt-[8px] pb-[4px]">
           <CardHeader title={t('queue', 'Queue')} meta={String(pendingTotal)} />
