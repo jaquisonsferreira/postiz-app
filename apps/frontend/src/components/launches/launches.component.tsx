@@ -20,6 +20,7 @@ import { useIntegrationList } from '@gitroom/frontend/components/launches/helper
 import { Onboarding } from '@gitroom/frontend/components/onboarding/onboarding';
 import { ChannelsAfterPayment } from '@gitroom/frontend/components/layout/check.payment';
 import { HubspotInstalled } from '@gitroom/frontend/components/launches/hubspot.installed';
+import { PostPreview } from '@gitroom/frontend/components/posts/post.preview.modal';
 
 export const SVGLine = () => {
   return (
@@ -123,6 +124,7 @@ export const LaunchesComponent = () => {
       <Onboarding />
       <ChannelsAfterPayment integrations={integrations} />
       <HubspotInstalled />
+      <PostPreview />
       <CalendarWeekProvider integrations={sortedIntegrations}>
         <div className="flex-1 min-w-0 flex flex-col gap-[20px]">
           <div className="flex flex-wrap items-center gap-[12px]">
