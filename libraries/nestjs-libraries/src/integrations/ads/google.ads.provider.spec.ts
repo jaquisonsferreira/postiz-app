@@ -102,6 +102,14 @@ describe('GoogleAdsProvider', () => {
     });
   });
 
+  it('assumes the usual hour of validity when Google omits expires_in', async () => {
+    fetchReturning({ access_token: 'new-access' });
+
+    const tokens = await provider.refreshToken('refresh');
+
+    expect(tokens.expiresIn).toBe(3600);
+  });
+
   it('asks for a new login when the refresh token was revoked', async () => {
     jest
       .spyOn(global, 'fetch')

@@ -170,7 +170,7 @@ describe('AdsService', () => {
       upsertMetric: jest.fn(),
     });
 
-    it('reads the last 30 days on the first sync and keeps every campaign that spent', async () => {
+    it('reads the last 90 days on the first sync, the longest period the screen offers, and keeps every campaign that spent', async () => {
       const dailyMetrics = jest.fn(fakeProvider().dailyMetrics);
       const repository = syncRepository();
       const service = serviceWith(repository, fakeProvider({ dailyMetrics }));
@@ -180,7 +180,7 @@ describe('AdsService', () => {
       expect(dailyMetrics).toHaveBeenCalledWith(
         'acesso',
         { externalId: '111', currency: 'BRL', loginCustomerId: null },
-        { from: '2026-09-17', to: '2026-10-17' }
+        { from: '2026-07-19', to: '2026-10-17' }
       );
       expect(repository.upsertCampaign).toHaveBeenCalledWith('conta', {
         externalId: 'c1',

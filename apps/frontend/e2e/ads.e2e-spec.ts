@@ -111,7 +111,7 @@ describe('Anúncios', () => {
     const account = page.getByTestId('ads-account');
     expect(await account.textContent()).toContain('Loja da Pauta');
     await account.getByRole('button', { name: 'Remover' }).click();
-    await page.getByRole('button', { name: 'Remover', exact: true }).last().click();
+    await page.getByRole('button', { name: 'Sim, exclua!' }).click();
 
     await page.getByTestId('ads-empty').waitFor();
     expect(await page.getByTestId('ads-campaign').count()).toBe(0);

@@ -23,6 +23,13 @@ describe('Ads DTOs', () => {
     ).toEqual(['from', 'to']);
   });
 
+  it('recusa dias que não existem no calendário', async () => {
+    expect(await errorsOf(AdsSummaryDto, { from: '2026-13-45', to: '2026-02-30' })).toEqual([
+      'from',
+      'to',
+    ]);
+  });
+
   it('exige o código e o estado do login', async () => {
     expect(await errorsOf(ConnectAdsDto, { code: 'codigo', state: 'estado' })).toEqual([]);
     expect(await errorsOf(ConnectAdsDto, {})).toEqual(['code', 'state']);
