@@ -55,12 +55,39 @@ describe('Pré-visualização interna', () => {
     expect(await modal().getByRole('tab', { name: 'Instagram' }).getAttribute('aria-selected')).toBe('true');
     expect(await modal().getByRole('tab', { name: 'Carrossel' }).getAttribute('aria-selected')).toBe('true');
     expect(await modal().getByTestId('post-preview-slide').count()).toBe(1);
+    const slide = () => modal().getByTestId('post-preview-slide').locator('img');
+    expect(await slide().getAttribute('src')).toBe('https://pauta.test/slide-1.png');
     await modal().getByRole('button', { name: 'Next slide' }).click();
     await modal().getByRole('button', { name: 'Previous slide' }).waitFor();
+    expect(await slide().getAttribute('src')).toBe('https://pauta.test/slide-2.png');
+
+    await page.keyboard.press('ArrowLeft');
+    await modal().getByRole('button', { name: 'Previous slide' }).waitFor({ state: 'detached' });
+    expect(await slide().getAttribute('src')).toBe('https://pauta.test/slide-1.png');
+
+    const box = await modal().getByTestId('post-preview-slide').boundingBox();
+    if (!box) {
+      throw new Error('Slide has no box');
+    }
+    await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await modal().getByRole('button', { name: 'Previous slide' }).waitFor();
+    expect(await slide().getAttribute('src')).toBe('https://pauta.test/slide-2.png');
 
     await modal().getByRole('tab', { name: 'Stories' }).click();
     await page.waitForURL(/format=story/);
-    await modal().getByTestId('post-preview-story').waitFor();
+    const story = modal().getByTestId('post-preview-story');
+    await story.waitFor();
+    expect(await story.getByTestId('post-preview-slide').locator('img').getAttribute('src')).toBe(
+      'https://pauta.test/slide-1.png'
+    );
+    await story.getByRole('button', { name: 'Next slide' }).click();
+    expect(await story.getByTestId('post-preview-slide').locator('img').getAttribute('src')).toBe(
+      'https://pauta.test/slide-2.png'
+    );
+    expect(await story.locator('[data-active="true"]').count()).toBe(2);
 
     await modal().getByRole('tab', { name: 'LinkedIn' }).click();
     await page.waitForURL(/network=linkedin/);
