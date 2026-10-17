@@ -109,6 +109,32 @@ describe('Aprovações', () => {
     await page.getByTestId('approval-queue').getByText('Carrossel longo').waitFor({ state: 'detached' });
   });
 
+  it('abre a prévia da legenda no formato da rede e passa os slides', async () => {
+    const { page } = session;
+    await page.goto(`${FRONTEND_URL}/approvals?id=${approveId}`);
+    const detail = page.getByTestId('approval-detail');
+    await detail.getByRole('button', { name: 'Pré-visualizar' }).click();
+
+    const modal = page.getByTestId('post-preview-modal');
+    await modal.waitFor();
+    await page.waitForURL(new RegExp(`preview=${approveId}-0`));
+    expect(page.url()).toContain(`id=${approveId}`);
+    await modal.getByText('Legenda do carrossel aprovado').first().waitFor();
+    expect(await modal.getByRole('tab', { name: 'LinkedIn' }).getAttribute('aria-selected')).toBe('true');
+    expect(await modal.getByRole('tab', { name: 'Carrossel' }).getAttribute('aria-selected')).toBe('true');
+
+    const slide = modal.getByTestId('post-preview-slide').locator('img');
+    const first = await slide.getAttribute('src');
+    await modal.getByRole('button', { name: 'Next slide' }).click();
+    await modal.getByRole('button', { name: 'Previous slide' }).waitFor();
+    expect(await slide.getAttribute('src')).not.toBe(first);
+
+    await page.keyboard.press('Escape');
+    await modal.waitFor({ state: 'detached' });
+    await page.waitForURL((url) => !url.searchParams.has('preview'));
+    expect(page.url()).toContain(`id=${approveId}`);
+  });
+
   it('aprova e agenda uma composição', async () => {
     const { page } = session;
     await page.goto(`${FRONTEND_URL}/approvals?id=${approveId}`);
