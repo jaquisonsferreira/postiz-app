@@ -983,5 +983,11 @@
   "brand_color": "Cor da marca",
   "requires_approval": "Revisar antes de agendar",
   "generate_and_send_for_approval": "Gerar e enviar para aprovação",
-  "generate_and_schedule": "Gerar e agendar"
+  "generate_and_schedule": "Gerar e agendar",
+  "status_reconnect": "Reconectar",
+  "status_disabled": "Desativado",
+  "status_connected": "Conectado",
+  "delete_channel_button": "Excluir canal",
+  "accounts_subtitle": "Redes onde seus posts são publicados. Conecte, reconecte ou desative cada canal.",
+  "no_channels_yet": "Nenhum canal conectado ainda. Adicione um para começar a publicar."
 }

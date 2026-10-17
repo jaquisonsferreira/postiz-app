@@ -985,5 +985,11 @@
   "brand_color": "Brand color",
   "requires_approval": "Review before scheduling",
   "generate_and_send_for_approval": "Generate and send for approval",
-  "generate_and_schedule": "Generate and schedule"
+  "generate_and_schedule": "Generate and schedule",
+  "status_reconnect": "Reconnect",
+  "status_disabled": "Disabled",
+  "status_connected": "Connected",
+  "delete_channel_button": "Delete channel",
+  "accounts_subtitle": "Networks where your posts are published. Connect, reconnect or turn off each channel.",
+  "no_channels_yet": "No channel connected yet. Add one to start publishing."
 }
