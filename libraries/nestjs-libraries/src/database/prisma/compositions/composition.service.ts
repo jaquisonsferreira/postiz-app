@@ -12,6 +12,7 @@ import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/me
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
+import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ChromiumSlideRenderer } from '@gitroom/nestjs-libraries/compositions/chromium.slide.renderer';
@@ -55,6 +56,12 @@ const REMOTE_IMAGE_TIMEOUT_MS = 30000;
 // Every composition on this worker shares the limit, so a burst of carousels
 // never runs more browsers than the publishing workers can live next to
 const renderSlot = pLimit(Number(process.env.COMPOSITION_RENDER_CONCURRENCY) || 2);
+
+// A generated background is kept for a day, so a retry after a failed render
+// or upload reuses it instead of paying for it again
+const BACKGROUND_CACHE_SECONDS = 24 * 60 * 60;
+const backgroundKey = (id: string, index: number): string =>
+  `composition:${id}:background:${index}`;
 
 const aiBackgrounds = (body: CreateCompositionDto): number =>
   (body.slides || []).filter((slide) => slide.background?.type === 'ai').length;
@@ -127,7 +134,10 @@ export class CompositionService {
   }
 
   async startComposition(org: Organization, body: CreateCompositionDto) {
-    if (!(await this.hasImageCredits(org, aiBackgrounds(body)))) {
+    // the request carries only part of the subscription, and the credit period
+    // starts at its creation date
+    const subscription = await this._subscriptionService.getSubscriptionByOrganizationId(org.id);
+    if (!(await this.hasImageCredits({ ...org, subscription } as Organization, aiBackgrounds(body)))) {
       throw new HttpException('Not enough AI image credits for the backgrounds', 402);
     }
 
@@ -208,7 +218,7 @@ export class CompositionService {
     }
 
     for (const post of composition.posts) {
-      await this._postsService.changePostStatus(org, post.postId, 'schedule');
+      await this.queuePost(org, post.postId);
     }
     await this._compositionRepository.updateComposition(id, { status: 'scheduled' });
 
@@ -334,6 +344,8 @@ export class CompositionService {
   }
 
   private async background(
+    id: string,
+    index: number,
     organization: Organization,
     background: NonNullable<CreateCompositionDto['slides']>[number]['background']
   ): Promise<string | undefined> {
@@ -342,6 +354,10 @@ export class CompositionService {
     }
     if (background.type === 'url') {
       return this.remoteImage(background.url as string);
+    }
+    const cached = await ioRedis.get(backgroundKey(id, index));
+    if (cached) {
+      return cached;
     }
     if (!(await this.hasImageCredits(organization, 1))) {
       throw new CompositionValidationError('Not enough AI image credits for the backgrounds');
@@ -355,7 +371,9 @@ export class CompositionService {
     if (!b64) {
       throw new CompositionValidationError('The image generator returned no image');
     }
-    return `data:image/png;base64,${b64}`;
+    const image = `data:image/png;base64,${b64}`;
+    await ioRedis.set(backgroundKey(id, index), image, 'EX', BACKGROUND_CACHE_SECONDS);
+    return image;
   }
 
   // Each slide is saved as soon as it is rendered, so a retry starts at the
@@ -385,7 +403,12 @@ export class CompositionService {
             total: slides.length,
             size,
             brand,
-            backgroundImage: await this.background(composition.organization, slide.background),
+            backgroundImage: await this.background(
+              id,
+              index,
+              composition.organization,
+              slide.background
+            ),
           });
           const png = await renderer.render(html, size);
           const path = await this._storage.uploadSimple(
@@ -403,6 +426,7 @@ export class CompositionService {
           if (!written.count) {
             throw new CompositionValidationError('The composition was deleted');
           }
+          await ioRedis.del(backgroundKey(id, index));
         }
       } finally {
         await renderer.close();
@@ -412,9 +436,50 @@ export class CompositionService {
     return media;
   }
 
+  // changePostStatus queues the first post and starts its workflow; the rest of
+  // a thread is published from it, so its posts only follow the state
+  private async queuePost(organizationId: string, postId: string) {
+    await this._postsService.changePostStatus(organizationId, postId, 'schedule');
+    const [, ...thread] = await this._postsService.getPostsRecursively(
+      postId,
+      false,
+      organizationId,
+      true
+    );
+    for (const post of thread) {
+      await this._postsService.changeState(post.id, 'QUEUE');
+    }
+  }
+
+  // Every channel is created as a draft and only queued once all of them
+  // exist, so a composition that fails halfway never publishes a part of it.
+  // The step is repeatable: a retry that finds every post saved finishes here
+  private async finishScheduling(
+    id: string,
+    organizationId: string,
+    requiresApproval: boolean,
+    posts: CompositionPost[]
+  ) {
+    if (!requiresApproval) {
+      for (const post of posts) {
+        await this.queuePost(organizationId, post.postId);
+      }
+    }
+    await this._compositionRepository.updateComposition(id, {
+      status: requiresApproval ? 'awaiting_approval' : 'scheduled',
+      error: null,
+    });
+  }
+
   async schedule(id: string): Promise<CompositionPost[]> {
     const composition = await this.loadForProcessing(id);
     if (composition.posts.length >= composition.body.targets.length) {
+      await this.finishScheduling(
+        id,
+        composition.organizationId,
+        composition.requiresApproval,
+        composition.posts
+      );
       return composition.posts;
     }
 
@@ -422,7 +487,7 @@ export class CompositionService {
     const body = await this.mapPosts(composition.organizationId, {
       compositionId: id,
       date: composition.body.date,
-      requiresApproval: composition.requiresApproval,
+      requiresApproval: true,
       targets: await this.resolveTargets(composition.organizationId, composition.body.targets),
       media: composition.media,
       tags: composition.body.tags,
@@ -473,17 +538,28 @@ export class CompositionService {
       }
     }
 
-    await this._compositionRepository.updateComposition(id, {
-      status: composition.requiresApproval ? 'awaiting_approval' : 'scheduled',
-      error: null,
-    });
+    await this.finishScheduling(
+      id,
+      composition.organizationId,
+      composition.requiresApproval,
+      posts
+    );
     return posts;
   }
 
+  // A failed composition publishes nothing: the posts it already created go too
   async fail(id: string, error: string) {
+    const composition = await this._compositionRepository.getCompositionById(id);
+    if (!composition) {
+      return;
+    }
     await this._compositionRepository.updateComposition(id, {
       status: 'failed',
       error,
     });
+    await this.deletePosts(
+      composition.organizationId,
+      parseList<CompositionPost>(composition.posts).map((post) => post.postId)
+    );
   }
 }
