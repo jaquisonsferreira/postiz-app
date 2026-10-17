@@ -75,11 +75,30 @@ export class CompositionRepository {
         ...PUBLIC_FIELDS,
         organizationId: true,
         payload: true,
-        organization: true,
+        organization: {
+          include: {
+            subscription: true,
+          },
+        },
       },
     });
   }
 
+  // Read after the composition is marked deleted, so it must not filter on it
+  getCompositionPosts(org: string, id: string) {
+    return this._composition.model.composition.findFirst({
+      where: {
+        id,
+        organizationId: org,
+      },
+      select: {
+        posts: true,
+      },
+    });
+  }
+
+  // A deleted composition is never written again, so an activity that was
+  // still running when it was deleted learns it from the count
   updateComposition(
     id: string,
     data: {
@@ -89,29 +108,29 @@ export class CompositionRepository {
       error?: string | null;
     }
   ) {
-    return this._composition.model.composition.update({
+    return this._composition.model.composition.updateMany({
       where: {
         id,
+        deletedAt: null,
       },
       data,
-      select: {
-        id: true,
-      },
     });
   }
 
-  // Only a composition still waiting for its posts can be claimed for approval,
-  // so two approvals racing never schedule the posts twice
+  // An approval that stopped halfway stays "approving" and can be sent again;
+  // flipping a post that is already queued is harmless
   claimApproval(org: string, id: string) {
     return this._composition.model.composition.updateMany({
       where: {
         id,
         organizationId: org,
         deletedAt: null,
-        status: 'awaiting_approval',
+        status: {
+          in: ['awaiting_approval', 'approving'],
+        },
       },
       data: {
-        status: 'scheduled',
+        status: 'approving',
       },
     });
   }

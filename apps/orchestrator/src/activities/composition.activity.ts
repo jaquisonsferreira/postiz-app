@@ -4,6 +4,7 @@ import { ApplicationFailure } from '@temporalio/common';
 import { CompositionService } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.service';
 import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositions/composition.errors';
 import { truncateForTemporal } from '@gitroom/nestjs-libraries/integrations/social.abstract';
+import { withHeartbeat } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 
 // A reason retrying can't change (a bad channel, an image that can't be read):
 // the workflow stops and the message is what the caller reads on the composition
@@ -30,7 +31,9 @@ export class CompositionActivity {
 
   @ActivityMethod()
   async renderComposition({ compositionId }: { compositionId: string }) {
-    await stopOnValidation(() => this._compositionService.renderMedia(compositionId));
+    await withHeartbeat(() =>
+      stopOnValidation(() => this._compositionService.renderMedia(compositionId))
+    );
   }
 
   @ActivityMethod()

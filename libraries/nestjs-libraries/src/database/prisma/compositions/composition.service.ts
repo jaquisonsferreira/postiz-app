@@ -3,14 +3,17 @@ import { Organization } from '@prisma/client';
 import { TypedSearchAttributes } from '@temporalio/common';
 import { TemporalService } from 'nestjs-temporal-core';
 import sharp from 'sharp';
+import pLimit from 'p-limit';
 import { CompositionRepository } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.repository';
 import { CreateCompositionDto } from '@gitroom/nestjs-libraries/dtos/compositions/create.composition.dto';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
+import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
+import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ChromiumSlideRenderer } from '@gitroom/nestjs-libraries/compositions/chromium.slide.renderer';
 import {
   buildSlideHtml,
@@ -30,12 +33,14 @@ export type CompositionStatus =
   | 'rendering'
   | 'scheduling'
   | 'awaiting_approval'
+  | 'approving'
   | 'scheduled'
   | 'failed';
 
 export interface CompositionPost {
   postId: string;
   integration: string;
+  target: number;
 }
 
 const SIZES: Record<NonNullable<CreateCompositionDto['size']>, SlideSize> = {
@@ -45,6 +50,14 @@ const SIZES: Record<NonNullable<CreateCompositionDto['size']>, SlideSize> = {
 };
 
 const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024;
+const REMOTE_IMAGE_TIMEOUT_MS = 30000;
+
+// Every composition on this worker shares the limit, so a burst of carousels
+// never runs more browsers than the publishing workers can live next to
+const renderSlot = pLimit(Number(process.env.COMPOSITION_RENDER_CONCURRENCY) || 2);
+
+const aiBackgrounds = (body: CreateCompositionDto): number =>
+  (body.slides || []).filter((slide) => slide.background?.type === 'ai').length;
 
 const describeBadRequest = (err: BadRequestException): string => {
   const message = (err.getResponse() as { message?: string | string[] }).message;
@@ -63,8 +76,17 @@ export class CompositionService {
     private _integrationService: IntegrationService,
     private _postsService: PostsService,
     private _mediaService: MediaService,
+    private _subscriptionService: SubscriptionService,
     private _temporalService: TemporalService
   ) {}
+
+  // Same rule as the media routes: credits only count where billing is on
+  private async hasImageCredits(org: Organization, needed: number): Promise<boolean> {
+    if (!needed || !process.env.STRIPE_PUBLISHABLE_KEY) {
+      return true;
+    }
+    return (await this._subscriptionService.checkCredits(org)).credits >= needed;
+  }
 
   private present(
     composition: NonNullable<Awaited<ReturnType<CompositionRepository['getComposition']>>>
@@ -105,6 +127,10 @@ export class CompositionService {
   }
 
   async startComposition(org: Organization, body: CreateCompositionDto) {
+    if (!(await this.hasImageCredits(org, aiBackgrounds(body)))) {
+      throw new HttpException('Not enough AI image credits for the backgrounds', 402);
+    }
+
     try {
       await this.mapPosts(org.id, {
         compositionId: 'validation',
@@ -184,12 +210,22 @@ export class CompositionService {
     for (const post of composition.posts) {
       await this._postsService.changePostStatus(org, post.postId, 'schedule');
     }
+    await this._compositionRepository.updateComposition(id, { status: 'scheduled' });
 
     return this.getComposition(org, id);
   }
 
+  private async deletePosts(org: string, postIds: string[]) {
+    for (const postId of postIds) {
+      const existing = await this._postsService.getPostById(postId, org);
+      if (existing && !existing.deletedAt) {
+        await this._postsService.deletePost(org, existing.group);
+      }
+    }
+  }
+
   async deleteComposition(org: string, id: string) {
-    const composition = await this.getComposition(org, id);
+    await this.getComposition(org, id);
 
     try {
       const handle = await this._temporalService.client.getWorkflowHandle(`composition_${id}`);
@@ -204,14 +240,15 @@ export class CompositionService {
       );
     }
 
-    for (const post of composition.posts) {
-      const existing = await this._postsService.getPostById(post.postId, org);
-      if (existing && !existing.deletedAt) {
-        await this._postsService.deletePost(org, existing.group);
-      }
-    }
-
+    // Marked deleted before its posts are read: a scheduling still running in
+    // the worker either saved its post before this point, and it is read here,
+    // or its save is refused and it removes the post itself
     await this._compositionRepository.deleteComposition(org, id);
+    const saved = await this._compositionRepository.getCompositionPosts(org, id);
+    await this.deletePosts(
+      org,
+      parseList<CompositionPost>(saved?.posts || null).map((post) => post.postId)
+    );
     return { id };
   }
 
@@ -228,25 +265,53 @@ export class CompositionService {
     };
   }
 
+  // An answer that can't change (blocked address, 4xx, too large, not an image)
+  // stops the composition; a timeout, a 5xx or a 429 is left to the retries
   private async remoteImage(url: string): Promise<string> {
+    // the dispatcher pins what DNS answers, but Node never asks DNS for an
+    // address written as an IP, so the address itself is checked first
+    if (!(await isSafePublicHttpsUrl(url))) {
+      throw new CompositionValidationError(`Could not download ${url}: blocked address`);
+    }
     let response: globalThis.Response;
     try {
       response = await fetch(url, {
         // @ts-ignore — undici option, not in lib.dom fetch types
         dispatcher: ssrfSafeDispatcher,
+        signal: AbortSignal.timeout(REMOTE_IMAGE_TIMEOUT_MS),
       });
     } catch (err: unknown) {
-      throw new CompositionValidationError(
-        `Could not download ${url}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      const cause = (err as { cause?: unknown }).cause;
+      const reason =
+        cause instanceof Error ? cause.message : err instanceof Error ? err.message : String(err);
+      if (reason === 'Blocked IP') {
+        throw new CompositionValidationError(`Could not download ${url}: ${reason}`);
+      }
+      throw new Error(`Could not download ${url}: ${reason}`);
     }
-    if (!response.ok) {
+    if (response.status >= 500 || response.status === 429) {
+      await response.body?.cancel();
+      throw new Error(`Could not download ${url}: HTTP ${response.status}`);
+    }
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
       throw new CompositionValidationError(`Could not download ${url}: HTTP ${response.status}`);
     }
-    const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > MAX_REMOTE_IMAGE_BYTES) {
+    if (Number(response.headers.get('content-length')) > MAX_REMOTE_IMAGE_BYTES) {
+      await response.body.cancel();
       throw new CompositionValidationError(`${url} is larger than 15MB`);
     }
+
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      size += chunk.length;
+      if (size > MAX_REMOTE_IMAGE_BYTES) {
+        throw new CompositionValidationError(`${url} is larger than 15MB`);
+      }
+      chunks.push(Buffer.from(chunk));
+    }
+    const body = Buffer.concat(chunks);
 
     try {
       const png = await sharp(body)
@@ -278,6 +343,9 @@ export class CompositionService {
     if (background.type === 'url') {
       return this.remoteImage(background.url as string);
     }
+    if (!(await this.hasImageCredits(organization, 1))) {
+      throw new CompositionValidationError('Not enough AI image credits for the backgrounds');
+    }
     const b64 = await this._mediaService.generateImage(
       background.prompt as string,
       organization,
@@ -285,60 +353,68 @@ export class CompositionService {
       true
     );
     if (!b64) {
-      throw new Error('The image generator returned no image');
+      throw new CompositionValidationError('The image generator returned no image');
     }
     return `data:image/png;base64,${b64}`;
   }
 
+  // Each slide is saved as soon as it is rendered, so a retry starts at the
+  // first missing slide and never pays for an AI background a second time
   async renderMedia(id: string): Promise<CompositionMedia[]> {
     const composition = await this.loadForProcessing(id);
     const slides = composition.body.slides || [];
-    if (composition.media.length || !slides.length) {
+    if (composition.media.length >= slides.length) {
       return composition.media;
     }
 
     await this._compositionRepository.updateComposition(id, { status: 'rendering' });
     const brand = await this.brand(composition.body);
     const size = SIZES[composition.body.size || 'portrait'];
-    const renderer = new ChromiumSlideRenderer({
-      executablePath: process.env.CHROMIUM_EXECUTABLE_PATH,
-    });
+    const media = [...composition.media];
 
-    const media: CompositionMedia[] = [];
-    try {
-      for (const [index, slide] of slides.entries()) {
-        const html = buildSlideHtml({
-          slide,
-          index,
-          total: slides.length,
-          size,
-          brand,
-          backgroundImage: await this.background(composition.organization, slide.background),
-        });
-        const png = await renderer.render(html, size);
-        const path = await this._storage.uploadSimple(
-          `data:image/png;base64,${png.toString('base64')}`
-        );
-        const saved = await this._mediaService.saveFile(
-          composition.organizationId,
-          path.split('/').pop() as string,
-          path
-        );
-        media.push({ id: saved.id, path: saved.path });
+    await renderSlot(async () => {
+      const renderer = new ChromiumSlideRenderer({
+        executablePath: process.env.CHROMIUM_EXECUTABLE_PATH,
+      });
+      try {
+        for (let index = media.length; index < slides.length; index++) {
+          const slide = slides[index];
+          const html = buildSlideHtml({
+            slide,
+            index,
+            total: slides.length,
+            size,
+            brand,
+            backgroundImage: await this.background(composition.organization, slide.background),
+          });
+          const png = await renderer.render(html, size);
+          const path = await this._storage.uploadSimple(
+            `data:image/png;base64,${png.toString('base64')}`
+          );
+          const saved = await this._mediaService.saveFile(
+            composition.organizationId,
+            path.split('/').pop() as string,
+            path
+          );
+          media.push({ id: saved.id, path: saved.path });
+          const written = await this._compositionRepository.updateComposition(id, {
+            media: JSON.stringify(media),
+          });
+          if (!written.count) {
+            throw new CompositionValidationError('The composition was deleted');
+          }
+        }
+      } finally {
+        await renderer.close();
       }
-    } finally {
-      await renderer.close();
-    }
-
-    await this._compositionRepository.updateComposition(id, {
-      media: JSON.stringify(media),
     });
+
     return media;
   }
 
   async schedule(id: string): Promise<CompositionPost[]> {
     const composition = await this.loadForProcessing(id);
-    if (composition.posts.length) {
+    if (composition.posts.length >= composition.body.targets.length) {
       return composition.posts;
     }
 
@@ -372,14 +448,32 @@ export class CompositionService {
       throw new CompositionValidationError(problems.join('; '));
     }
 
-    const posts = (await this._postsService.createPost(
-      composition.organizationId,
-      body,
-      'API'
-    )) as CompositionPost[];
+    // One channel at a time, each post saved on the record as soon as it
+    // exists: the repository gives a new post a new id, so a retry skips the
+    // channels already saved instead of creating them twice
+    const posts = [...composition.posts];
+    for (const [target, post] of body.posts.entries()) {
+      if (posts.some((saved) => saved.target === target)) {
+        continue;
+      }
+      const [created] = (await this._postsService.createPost(
+        composition.organizationId,
+        { ...body, posts: [post] },
+        'API'
+      )) as Omit<CompositionPost, 'target'>[];
+      posts.push({ ...created, target });
+
+      const written = await this._compositionRepository.updateComposition(id, {
+        posts: JSON.stringify(posts),
+      });
+      // deleted while the post was being created: it must not be published
+      if (!written.count) {
+        await this.deletePosts(composition.organizationId, [created.postId]);
+        throw new CompositionValidationError('The composition was deleted');
+      }
+    }
 
     await this._compositionRepository.updateComposition(id, {
-      posts: JSON.stringify(posts),
       status: composition.requiresApproval ? 'awaiting_approval' : 'scheduled',
       error: null,
     });

@@ -6,9 +6,12 @@ import {
 } from '@temporalio/workflow';
 import { CompositionActivity } from '@gitroom/orchestrator/activities/composition.activity';
 
-// Rendering can pay for AI backgrounds, so a failed attempt is tried once more only
+// Rendering can pay for AI backgrounds, so a failed attempt is tried once more
+// only, and it starts at the first slide that was not saved. The heartbeat
+// tells a worker that died mid-render from a slow AI generation
 const { renderComposition } = proxyActivities<CompositionActivity>({
   startToCloseTimeout: '15 minute',
+  heartbeatTimeout: '1 minute',
   taskQueue: 'main',
   retry: {
     maximumAttempts: 2,

@@ -33,8 +33,6 @@ export const captionToHtml = (text: string): string =>
     .map((line) => `<p>${escapeHtml(line)}</p>`)
     .join('');
 
-// The value ids become the post ids (the repository upserts on them), so a
-// retried scheduling writes the same rows again instead of a second set
 export const buildCompositionPosts = (input: CompositionPostsInput): CreatePostDto => {
   if (!input.targets.length) {
     throw new CompositionValidationError('At least one channel is required');
