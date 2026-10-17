@@ -1,0 +1,1112 @@
+import sharp from 'sharp';
+import dayjs from 'dayjs';
+import { HttpException } from '@nestjs/common';
+import { TemporalService } from 'nestjs-temporal-core';
+import { WorkflowNotFoundError } from '@temporalio/common';
+import { ioRedis } from '@gitroom/nestjs-libraries/redis/redis.service';
+import { CompositionService } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.service';
+import { CompositionRepository } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.repository';
+import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
+import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
+import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
+import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
+import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
+import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositions/composition.errors';
+
+// The collaborators are replaced by the stubs of each test: their modules load
+// ESM-only packages that Jest can't require
+jest.mock('@gitroom/nestjs-libraries/database/prisma/integrations/integration.service', () => ({
+  IntegrationService: class IntegrationService {},
+}));
+jest.mock('@gitroom/nestjs-libraries/database/prisma/posts/posts.service', () => ({
+  PostsService: class PostsService {},
+}));
+jest.mock('@gitroom/nestjs-libraries/database/prisma/media/media.service', () => ({
+  MediaService: class MediaService {},
+}));
+jest.mock('@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service', () => ({
+  SubscriptionService: class SubscriptionService {},
+}));
+jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
+  IntegrationManager: class IntegrationManager {},
+}));
+const mockRemoveFile = jest.fn();
+jest.mock('@gitroom/nestjs-libraries/upload/upload.factory', () => ({
+  UploadFactory: {
+    createStorage: () => ({
+      uploadSimple: async () => '/uploads/slide.png',
+      removeFile: mockRemoveFile,
+    }),
+  },
+}));
+
+const storedComposition = (payload: Record<string, unknown>, posts: unknown[] = []) => ({
+  id: 'composicao',
+  status: 'pending',
+  requiresApproval: false,
+  organizationId: 'org',
+  organization: { id: 'org' },
+  payload: JSON.stringify(payload),
+  media: null as string | null,
+  posts: posts.length ? JSON.stringify(posts) : null,
+});
+
+const serviceWith = ({
+  repository = {},
+  posts = {},
+  media = {},
+  temporal = {},
+  integrations = {},
+  subscriptions = {},
+  manager = {},
+}: {
+  repository?: Record<string, unknown>;
+  posts?: Record<string, unknown>;
+  media?: Record<string, unknown>;
+  temporal?: Record<string, unknown>;
+  integrations?: Record<string, unknown>;
+  subscriptions?: Record<string, unknown>;
+  manager?: Record<string, unknown>;
+}) =>
+  new CompositionService(
+    repository as unknown as CompositionRepository,
+    integrations as unknown as IntegrationService,
+    posts as unknown as PostsService,
+    media as unknown as MediaService,
+    subscriptions as unknown as SubscriptionService,
+    { client: temporal } as unknown as TemporalService,
+    manager as unknown as IntegrationManager
+  );
+
+// The in-memory Redis of the tests runs no scripts, so the two the locks send
+// (compare the token, then renew or delete) are run here on its data
+const readRedis = ioRedis.get.bind(ioRedis);
+const redisEval = jest.fn(
+  async (script: string, _keys: number, key: string, token: string, seconds?: number) => {
+    if ((await readRedis(key)) !== token) {
+      return 0;
+    }
+    return script.includes("'del'") ? ioRedis.del(key) : ioRedis.expire(key, Number(seconds));
+  }
+);
+Object.assign(ioRedis, { eval: redisEval });
+
+describe('CompositionService', () => {
+  it.each([
+    ['square', false],
+    ['portrait', true],
+    ['story', true],
+  ])('gera o fundo por IA no formato %s com vertical %s', async (size, vertical) => {
+    const background = (
+      await sharp({
+        create: { width: 4, height: 4, channels: 3, background: '#6D4AFF' },
+      })
+        .png()
+        .toBuffer()
+    ).toString('base64');
+    const generateImage = jest.fn().mockResolvedValue(background);
+    const service = serviceWith({
+      repository: {
+        getCompositionById: jest.fn().mockResolvedValue(
+          storedComposition({
+            format: 'image',
+            size,
+            slides: [{ headline: 'Título', background: { type: 'ai', prompt: 'um céu roxo' } }],
+            targets: [{ integrationId: 'canal', content: 'Legenda' }],
+          })
+        ),
+        claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+        saveMedia: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      media: {
+        generateImage,
+        saveFile: jest.fn().mockResolvedValue({ id: 'midia', path: '/uploads/slide.png' }),
+      },
+    });
+
+    await service.renderMedia(`composicao-${size}`);
+
+    expect(generateImage).toHaveBeenCalledWith('um céu roxo', { id: 'org' }, false, vertical);
+  }, 60000);
+
+  describe('enfileiramento de um fio', () => {
+    const thread = [{ id: 'raiz' }, { id: 'resposta-1' }, { id: 'resposta-2' }];
+
+    const queueing = (workflowStarted: boolean) => {
+      const calls: string[] = [];
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              { format: 'text', targets: [{ integrationId: 'canal', content: 'Fio' }] },
+              [{ postId: 'raiz', integration: 'canal', target: 0 }]
+            )
+          ),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          holdQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'DRAFT', deletedAt: null }),
+          getPostsRecursively: jest.fn().mockResolvedValue(thread),
+          changePostStatus: jest.fn(async (_org: string, id: string) => {
+            calls.push(`workflow ${id}`);
+          }),
+          changeState: jest.fn(async (id: string, state: string) => {
+            calls.push(`${id} ${state}`);
+          }),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe: jest
+              .fn()
+              .mockResolvedValue({ status: { name: workflowStarted ? 'RUNNING' : 'FAILED' } }),
+          }),
+        },
+      });
+      return { service, calls };
+    };
+
+    it('coloca as respostas na fila antes de iniciar a publicação da raiz', async () => {
+      const { service, calls } = queueing(true);
+
+      await service.schedule('composicao');
+
+      expect(calls).toEqual(['resposta-1 QUEUE', 'resposta-2 QUEUE', 'workflow raiz']);
+    });
+
+    it('devolve a raiz e as respostas a rascunho quando a publicação não começou', async () => {
+      const { service, calls } = queueing(false);
+
+      await expect(service.schedule('composicao')).rejects.toThrow('canal');
+
+      expect(calls.slice(3)).toEqual(['raiz DRAFT', 'resposta-1 DRAFT', 'resposta-2 DRAFT']);
+    });
+  });
+
+  describe('fundo por IA recusado', () => {
+    const rendering = (rejection: HttpException) =>
+      serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título', background: { type: 'ai', prompt: 'um prompt recusado' } }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        media: {
+          generateImage: jest.fn().mockRejectedValue(rejection),
+        },
+      });
+
+    it('para a composição com a mensagem do gerador quando ele recusa o prompt', async () => {
+      const message =
+        'Your request was rejected by the AI safety system. Flagged categories: violence. Please adjust your prompt and try again.';
+
+      const error = await rendering(new HttpException(message, 422))
+        .renderMedia('composicao-recusada')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(CompositionValidationError);
+      expect((error as Error).message).toContain(message);
+    }, 60000);
+
+    it('deixa uma falha temporária do gerador para a próxima tentativa', async () => {
+      const error = await rendering(
+        new HttpException('AI generation failed, please try again later.', 500)
+      )
+        .renderMedia('composicao-falha-temporaria')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(CompositionValidationError);
+    }, 60000);
+  });
+
+  describe('limite mensal de posts do plano', () => {
+    const env = { ...process.env };
+    const periodStart = dayjs().subtract(2, 'month').subtract(3, 'day');
+    const thread = [
+      { id: 'raiz', integrationId: 'canal', settings: '{}', content: 'Fio', image: '[]', state: 'DRAFT', deletedAt: null },
+      { id: 'resposta-1', content: 'Resposta 1', image: '[]', state: 'DRAFT', deletedAt: null },
+      { id: 'resposta-2', content: 'Resposta 2', image: '[]', state: 'DRAFT', deletedAt: null },
+    ];
+
+    beforeEach(() => {
+      process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test';
+    });
+    afterEach(() => {
+      process.env = { ...env };
+    });
+
+    const withPlan = (
+      subscription: { subscriptionTier: string; createdAt: Date } | null,
+      used: number,
+      members: Record<string, unknown>[] = thread
+    ) => {
+      const changePostStatus = jest.fn();
+      const changeState = jest.fn();
+      const countPostsFromDay = jest.fn().mockResolvedValue(used);
+      const claimApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              { format: 'text', targets: [{ integrationId: 'canal', content: 'Fio' }] },
+              [{ postId: 'raiz', integration: 'canal', target: 0 }]
+            )
+          ),
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          holdQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          claimApproval,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'DRAFT', deletedAt: null }),
+          getPostsRecursively: jest.fn().mockResolvedValue(members),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          countPostsFromDay,
+          changePostStatus,
+          changeState,
+        },
+        integrations: {
+          getIntegrationById: jest
+            .fn()
+            .mockResolvedValue({ id: 'canal', providerIdentifier: 'x', deletedAt: null, disabled: false }),
+        },
+        subscriptions: {
+          getSubscription: jest.fn().mockResolvedValue(subscription),
+        },
+        manager: {
+          getSocialIntegration: jest.fn().mockReturnValue({ comment: jest.fn() }),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe: jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } }),
+          }),
+        },
+      });
+      return { service, changePostStatus, changeState, countPostsFromDay, claimApproval };
+    };
+
+    it('para a composição sem enfileirar quando o fio passa do limite do mês', async () => {
+      const { service, changePostStatus, changeState } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999998
+      );
+
+      const error = await service.schedule('composicao').catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(CompositionValidationError);
+      expect((error as Error).message).toContain('maximum number of posts');
+      expect(changeState).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('enfileira o fio que cabe no que resta do mês, contado desde o início do período', async () => {
+      const { service, changePostStatus, countPostsFromDay } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999997
+      );
+
+      await service.schedule('composicao');
+
+      expect(countPostsFromDay).toHaveBeenCalledWith('org', periodStart.add(2, 'month').toDate());
+      expect(changePostStatus).toHaveBeenCalledWith('org', 'raiz', 'schedule');
+    });
+
+    it('conta só as respostas que ainda são rascunho quando uma tentativa parou no meio do fio', async () => {
+      const { service, changePostStatus } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999999,
+        [thread[0], { ...thread[1], state: 'QUEUE' }, { ...thread[2], state: 'QUEUE' }]
+      );
+
+      await service.schedule('composicao');
+
+      expect(changePostStatus).toHaveBeenCalledWith('org', 'raiz', 'schedule');
+    });
+
+    it('não enfileira posts de uma organização sem assinatura', async () => {
+      const { service, changePostStatus } = withPlan(null, 0);
+
+      await expect(service.schedule('composicao')).rejects.toBeInstanceOf(
+        CompositionValidationError
+      );
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('recusa a aprovação que passaria do limite do mês antes de reservá-la', async () => {
+      const { service, claimApproval, changePostStatus } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999998
+      );
+
+      const error = await service
+        .approveComposition('org', 'composicao')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(402);
+      expect(claimApproval).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('não conta posts quando a cobrança está desligada', async () => {
+      delete process.env.STRIPE_PUBLISHABLE_KEY;
+      const { service, changePostStatus, countPostsFromDay } = withPlan(null, 0);
+
+      await service.schedule('composicao');
+
+      expect(countPostsFromDay).not.toHaveBeenCalled();
+      expect(changePostStatus).toHaveBeenCalled();
+    });
+  });
+
+  describe('post já na fila de uma tentativa que parou', () => {
+    const queued = (workflow: 'RUNNING' | 'missing' | 'unreachable') => {
+      const calls: string[] = [];
+      const finishQueueing = jest.fn().mockResolvedValue({ count: 1 });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              { format: 'text', targets: [{ integrationId: 'canal', content: 'Fio' }] },
+              [{ postId: 'raiz', integration: 'canal', target: 0 }]
+            )
+          ),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          holdQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'QUEUE', deletedAt: null }),
+          getPostsRecursively: jest
+            .fn()
+            .mockResolvedValue([{ id: 'raiz' }, { id: 'resposta-1' }]),
+          changePostStatus: jest.fn(async (_org: string, id: string) => {
+            calls.push(`workflow ${id}`);
+          }),
+          changeState: jest.fn(async (id: string, state: string) => {
+            calls.push(`${id} ${state}`);
+          }),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe:
+              workflow === 'RUNNING'
+                ? jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } })
+                : workflow === 'missing'
+                ? jest
+                    .fn()
+                    .mockRejectedValue(
+                      new WorkflowNotFoundError('Workflow not found', 'post_raiz', undefined)
+                    )
+                : jest.fn().mockRejectedValue(new Error('14 UNAVAILABLE: connection refused')),
+          }),
+        },
+      });
+      return { service, calls, finishQueueing };
+    };
+
+    it('devolve a rascunho o post na fila cuja publicação nunca começou, para a próxima tentativa iniciá-la', async () => {
+      const { service, calls, finishQueueing } = queued('missing');
+
+      await expect(service.schedule('composicao')).rejects.toThrow('canal');
+
+      expect(calls).toEqual(['raiz DRAFT', 'resposta-1 DRAFT']);
+      expect(finishQueueing).not.toHaveBeenCalled();
+    });
+
+    it('não mexe no post quando o Temporal não responde, e deixa para a próxima tentativa', async () => {
+      const { service, calls, finishQueueing } = queued('unreachable');
+
+      const error = await service.schedule('composicao').catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(CompositionValidationError);
+      expect(calls).toEqual([]);
+      expect(finishQueueing).not.toHaveBeenCalled();
+    });
+
+    it('mantém o post na fila cuja publicação já começou', async () => {
+      const { service, calls, finishQueueing } = queued('RUNNING');
+
+      await service.schedule('composicao');
+
+      expect(calls).toEqual([]);
+      expect(finishQueueing).toHaveBeenCalled();
+    });
+  });
+
+  describe('criação dos rascunhos de um canal', () => {
+    const creating = ({ saved, current }: { saved: boolean; current: unknown }) => {
+      const calls: string[] = [];
+      const stored = storedComposition({
+        format: 'text',
+        requiresApproval: true,
+        targets: [{ integrationId: 'canal', content: 'Legenda' }],
+      });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest
+            .fn()
+            .mockResolvedValueOnce({ ...stored, requiresApproval: true })
+            .mockResolvedValue(current),
+          claimScheduling: jest.fn().mockResolvedValue({ count: 1 }),
+          holdScheduling: jest.fn().mockResolvedValue({ count: 1 }),
+          savePosts: jest.fn().mockResolvedValue({ count: saved ? 1 : 0 }),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        posts: {
+          mapTypeToPost: jest.fn(async (body: unknown) => body),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          deletePost: jest.fn(async (_org: string, group: string) => {
+            calls.push(`delete ${group}`);
+          }),
+          createPost: jest.fn(async () => {
+            calls.push('create');
+            return [{ postId: 'composicao-0-0', integration: 'canal' }];
+          }),
+        },
+        integrations: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'canal',
+            providerIdentifier: 'x',
+            deletedAt: null,
+            disabled: false,
+          }),
+        },
+      });
+      return { service, calls };
+    };
+
+    it('não apaga o grupo do canal antes de recriar os posts, que voltam com os mesmos ids', async () => {
+      const { service, calls } = creating({ saved: true, current: null });
+
+      await service.schedule('composicao');
+
+      expect(calls).toEqual(['create']);
+    });
+
+    it('remove o rascunho criado depois que a composição foi excluída', async () => {
+      const { service, calls } = creating({ saved: false, current: null });
+
+      await expect(service.schedule('composicao')).rejects.toThrow();
+
+      expect(calls).toEqual(['create', 'delete composicao-0']);
+    });
+
+    it('remove o rascunho criado depois que a composição falhou', async () => {
+      const { service, calls } = creating({
+        saved: false,
+        current: { id: 'composicao', status: 'failed' },
+      });
+
+      await expect(service.schedule('composicao')).rejects.toThrow();
+
+      expect(calls).toEqual(['create', 'delete composicao-0']);
+    });
+
+    it('deixa o rascunho para a tentativa que assumiu a reserva', async () => {
+      const { service, calls } = creating({
+        saved: false,
+        current: { id: 'composicao', status: 'scheduling' },
+      });
+
+      await expect(service.schedule('composicao')).rejects.toThrow('another attempt');
+
+      expect(calls).toEqual(['create']);
+    });
+  });
+
+  describe('slide salvo por outra tentativa', () => {
+    it('remove a mídia que esta tentativa criou antes de desistir', async () => {
+      mockRemoveFile.mockClear();
+      const deleteMedia = jest.fn();
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título' }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+          saveMedia: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        media: {
+          saveFile: jest.fn().mockResolvedValue({ id: 'midia', path: '/uploads/slide.png' }),
+          deleteMedia,
+        },
+      });
+
+      await expect(service.renderMedia('composicao-disputada')).rejects.toThrow(
+        'another render attempt'
+      );
+
+      expect(deleteMedia).toHaveBeenCalledWith('org', 'midia');
+      expect(mockRemoveFile).toHaveBeenCalledWith('/uploads/slide.png');
+    }, 60000);
+
+    const failingCheckpoint = (step: 'saveFile' | 'saveMedia', error: Error) => {
+      mockRemoveFile.mockClear();
+      const deleteMedia = jest.fn();
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título' }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+          saveMedia:
+            step === 'saveMedia'
+              ? jest.fn().mockRejectedValue(error)
+              : jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        media: {
+          saveFile:
+            step === 'saveFile'
+              ? jest.fn().mockRejectedValue(error)
+              : jest.fn().mockResolvedValue({ id: 'midia', path: '/uploads/slide.png' }),
+          deleteMedia,
+        },
+      });
+      return { service, deleteMedia };
+    };
+
+    it('remove o arquivo enviado quando a mídia não pôde ser gravada', async () => {
+      const error = new Error('connection terminated');
+      const { service, deleteMedia } = failingCheckpoint('saveFile', error);
+
+      await expect(service.renderMedia('composicao-sem-midia')).rejects.toBe(error);
+
+      expect(mockRemoveFile).toHaveBeenCalledWith('/uploads/slide.png');
+      expect(deleteMedia).not.toHaveBeenCalled();
+    }, 60000);
+
+    it('remove a mídia e o arquivo quando o slide não pôde ser gravado na composição', async () => {
+      const error = new Error('connection terminated');
+      const { service, deleteMedia } = failingCheckpoint('saveMedia', error);
+
+      await expect(service.renderMedia('composicao-sem-checkpoint')).rejects.toBe(error);
+
+      expect(deleteMedia).toHaveBeenCalledWith('org', 'midia');
+      expect(mockRemoveFile).toHaveBeenCalledWith('/uploads/slide.png');
+    }, 60000);
+  });
+
+  describe('fila de posts da organização com a cobrança ativa', () => {
+    const env = { ...process.env };
+    const periodStart = dayjs().subtract(3, 'day');
+    beforeEach(() => {
+      process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test';
+    });
+    afterEach(() => {
+      process.env = { ...env };
+      jest.restoreAllMocks();
+    });
+
+    const composing = () => {
+      const changePostStatus = jest.fn();
+      const claimQueueing = jest.fn().mockResolvedValue({ count: 1 });
+      const claimApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              { format: 'text', targets: [{ integrationId: 'canal', content: 'Legenda' }] },
+              [{ postId: 'raiz', integration: 'canal', target: 0 }]
+            )
+          ),
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimQueueing,
+          holdQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          claimApproval,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'DRAFT', deletedAt: null }),
+          getPostsRecursively: jest.fn().mockResolvedValue([
+            { id: 'raiz', integrationId: 'canal', settings: '{}', content: 'Legenda', image: '[]', state: 'DRAFT', deletedAt: null },
+          ]),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          countPostsFromDay: jest.fn().mockResolvedValue(0),
+          changePostStatus,
+          changeState: jest.fn(),
+        },
+        integrations: {
+          getIntegrationById: jest
+            .fn()
+            .mockResolvedValue({ id: 'canal', deletedAt: null, disabled: false }),
+        },
+        subscriptions: {
+          getSubscription: jest
+            .fn()
+            .mockResolvedValue({ subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() }),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe: jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } }),
+          }),
+        },
+      });
+      return { service, changePostStatus, claimQueueing, claimApproval };
+    };
+
+    it('espera outra composição da organização terminar de enfileirar antes de contar os posts', async () => {
+      jest.spyOn(ioRedis, 'set').mockResolvedValueOnce(null);
+      const { service, changePostStatus, claimQueueing } = composing();
+
+      const error = await service.schedule('composicao').catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(CompositionValidationError);
+      expect(claimQueueing).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('responde 409 à aprovação enquanto outra composição da organização enfileira', async () => {
+      jest.spyOn(ioRedis, 'set').mockResolvedValueOnce(null);
+      const { service, claimApproval, changePostStatus } = composing();
+
+      const error = await service
+        .approveComposition('org', 'composicao')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(409);
+      expect(claimApproval).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('libera a fila da organização depois de enfileirar', async () => {
+      const set = jest.spyOn(ioRedis, 'set');
+      const { service, changePostStatus } = composing();
+
+      await service.schedule('composicao');
+
+      expect(changePostStatus).toHaveBeenCalled();
+      const key = set.mock.calls[0][0] as string;
+      expect(key).toContain('org');
+      expect(await ioRedis.get(key)).toBeFalsy();
+    });
+  });
+
+  describe('falha da composição', () => {
+    const failing = (claimed: number) => {
+      const deletePost = jest.fn();
+      const getPostById = jest.fn();
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              { format: 'text', targets: [{ integrationId: 'canal', content: 'Legenda' }] },
+              [{ postId: 'raiz', integration: 'canal', target: 0 }]
+            )
+          ),
+          failProcessing: jest.fn().mockResolvedValue({ count: claimed }),
+          markFailed: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        posts: {
+          getPostById: getPostById.mockResolvedValue({
+            id: 'raiz',
+            group: 'composicao-0',
+            state: 'DRAFT',
+            deletedAt: null,
+          }),
+          deletePost,
+        },
+      });
+      return { service, deletePost, getPostById };
+    };
+
+    it('não limpa uma composição que terminou de agendar antes da falha', async () => {
+      const { service, deletePost, getPostById } = failing(0);
+
+      await service.fail('composicao', 'The posts could not be created');
+
+      expect(getPostById).not.toHaveBeenCalled();
+      expect(deletePost).not.toHaveBeenCalled();
+    });
+
+    it('remove os rascunhos de uma composição que ainda estava em andamento', async () => {
+      const { service, deletePost } = failing(1);
+
+      await service.fail('composicao', 'The posts could not be created');
+
+      expect(deletePost).toHaveBeenCalledWith('org', 'composicao-0');
+    });
+  });
+
+  describe('rascunho editado durante a aprovação', () => {
+    it('confere de novo cada rascunho antes de enfileirá-lo e devolve a aprovação', async () => {
+      const changePostStatus = jest.fn();
+      const releaseApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const finishApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const draft = {
+        id: 'raiz',
+        integrationId: 'canal',
+        settings: '{}',
+        content: 'Legenda',
+        image: '[]',
+        state: 'DRAFT',
+        deletedAt: null,
+      };
+      const service = serviceWith({
+        repository: {
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimApproval: jest.fn().mockResolvedValue({ count: 1 }),
+          holdApproval: jest.fn().mockResolvedValue({ count: 1 }),
+          releaseApproval,
+          finishApproval,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue(draft),
+          getPostsRecursively: jest
+            .fn()
+            .mockResolvedValueOnce([draft])
+            .mockResolvedValue([{ ...draft, content: 'Legenda editada longa demais' }]),
+          validatePosts: jest
+            .fn()
+            .mockResolvedValueOnce([])
+            .mockResolvedValue([
+              { name: 'Canal', identifier: 'x', valid: true, errors: 'the post is too long' },
+            ]),
+          changePostStatus,
+          changeState: jest.fn(),
+        },
+        integrations: {
+          getIntegrationById: jest
+            .fn()
+            .mockResolvedValue({ id: 'canal', deletedAt: null, disabled: false }),
+        },
+      });
+
+      const error = await service
+        .approveComposition('org', 'composicao')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(400);
+      expect((error as Error).message).toContain('the post is too long');
+      expect(changePostStatus).not.toHaveBeenCalled();
+      expect(releaseApproval).toHaveBeenCalledWith('composicao', expect.any(String));
+      expect(finishApproval).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('trava da organização com a cobrança ativa', () => {
+    const env = { ...process.env };
+    beforeEach(() => {
+      process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test';
+    });
+    afterEach(() => {
+      process.env = { ...env };
+      jest.restoreAllMocks();
+    });
+
+    const scheduling = () => {
+      const changePostStatus = jest.fn();
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              {
+                format: 'text',
+                targets: [
+                  { integrationId: 'canal', content: 'Legenda' },
+                  { integrationId: 'canal', content: 'Legenda' },
+                ],
+              },
+              [
+                { postId: 'raiz', integration: 'canal', target: 0 },
+                { postId: 'raiz-2', integration: 'canal', target: 1 },
+              ]
+            )
+          ),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          holdQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'DRAFT', deletedAt: null }),
+          getPostsRecursively: jest
+            .fn()
+            .mockResolvedValue([{ id: 'raiz', state: 'DRAFT', deletedAt: null }]),
+          countPostsFromDay: jest.fn().mockResolvedValue(0),
+          changePostStatus,
+          changeState: jest.fn(),
+        },
+        subscriptions: {
+          getSubscription: jest.fn().mockResolvedValue({
+            subscriptionTier: 'STANDARD',
+            createdAt: dayjs().subtract(3, 'day').toDate(),
+          }),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe: jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } }),
+          }),
+        },
+      });
+      return { service, changePostStatus };
+    };
+
+    it('renova a trava da fila de posts a cada canal enfileirado', async () => {
+      const set = jest.spyOn(ioRedis, 'set');
+      const expire = jest.spyOn(ioRedis, 'expire');
+      const { service, changePostStatus } = scheduling();
+
+      await service.schedule('composicao');
+
+      const key = set.mock.calls[0][0];
+      expect(changePostStatus).toHaveBeenCalledTimes(2);
+      expect(expire.mock.calls.filter(([renewed]) => renewed === key).length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('para de enfileirar quando a trava passou para outra composição', async () => {
+      // the lock holds another composition's token when this one renews it
+      redisEval.mockResolvedValueOnce(0);
+      const { service, changePostStatus } = scheduling();
+
+      const error = await service.schedule('composicao').catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(CompositionValidationError);
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('espera a vez da organização para conferir e gastar o crédito de um fundo por IA', async () => {
+      const background = (
+        await sharp({ create: { width: 4, height: 4, channels: 3, background: '#6D4AFF' } })
+          .png()
+          .toBuffer()
+      ).toString('base64');
+      const order: string[] = [];
+      const set = jest.spyOn(ioRedis, 'set').mockImplementationOnce(async (key: unknown) => {
+        order.push(`ocupada ${String(key)}`);
+        return null;
+      });
+      const checkCredits = jest.fn(async () => {
+        order.push('créditos');
+        return { credits: 1 };
+      });
+      const generateImage = jest.fn(async () => {
+        order.push('gera');
+        return background;
+      });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título', background: { type: 'ai', prompt: 'um céu roxo' } }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+          saveMedia: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        media: {
+          generateImage,
+          saveFile: jest.fn().mockResolvedValue({ id: 'midia', path: '/uploads/slide.png' }),
+        },
+        subscriptions: { checkCredits },
+      });
+
+      await service.renderMedia('composicao-creditos');
+
+      expect(order[0]).toContain('credits');
+      expect(order.slice(1)).toEqual(['créditos', 'gera']);
+      expect(set.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(generateImage).toHaveBeenCalledTimes(1);
+    }, 60000);
+
+    it('renova e libera a trava com uma única operação condicional no Redis', async () => {
+      const set = jest.spyOn(ioRedis, 'set');
+      const get = jest.spyOn(ioRedis, 'get');
+      redisEval.mockClear();
+      const { service } = scheduling();
+
+      await service.schedule('composicao');
+
+      const key = set.mock.calls[0][0];
+      expect(get.mock.calls.filter(([read]) => read === key)).toEqual([]);
+      expect(redisEval.mock.calls.filter((call) => call[2] === key).length).toBeGreaterThanOrEqual(3);
+      expect(await ioRedis.get(key as string)).toBeFalsy();
+    });
+
+    it('reaproveita o fundo que outra renderização gerou enquanto esperava a trava de créditos', async () => {
+      const image = `data:image/png;base64,${(
+        await sharp({ create: { width: 4, height: 4, channels: 3, background: '#6D4AFF' } })
+          .png()
+          .toBuffer()
+      ).toString('base64')}`;
+      const read = ioRedis.get.bind(ioRedis);
+      let backgroundReads = 0;
+      jest.spyOn(ioRedis, 'get').mockImplementation(async (key: unknown) => {
+        if (String(key).includes(':background:')) {
+          backgroundReads++;
+          // the other render saves the image while this one waits for the lock
+          return backgroundReads === 1 ? null : image;
+        }
+        return read(key as string);
+      });
+      const checkCredits = jest.fn().mockResolvedValue({ credits: 0 });
+      const generateImage = jest.fn();
+      const saveMedia = jest.fn().mockResolvedValue({ count: 1 });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título', background: { type: 'ai', prompt: 'um céu roxo' } }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+          saveMedia,
+        },
+        media: {
+          generateImage,
+          saveFile: jest.fn().mockResolvedValue({ id: 'midia', path: '/uploads/slide.png' }),
+        },
+        subscriptions: { checkCredits },
+      });
+
+      await service.renderMedia('composicao-fundo-de-outra');
+
+      expect(generateImage).not.toHaveBeenCalled();
+      expect(checkCredits).not.toHaveBeenCalled();
+      expect(saveMedia).toHaveBeenCalled();
+    }, 60000);
+  });
+
+  describe('canal sem comentários na aprovação', () => {
+    it('recusa um fio movido no painel para um canal que não publica comentários', async () => {
+      const claimApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const changePostStatus = jest.fn();
+      const service = serviceWith({
+        repository: {
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimApproval,
+        },
+        posts: {
+          getPostsRecursively: jest.fn().mockResolvedValue([
+            { id: 'raiz', integrationId: 'blog', settings: '{}', content: 'Fio', image: '[]', state: 'DRAFT', deletedAt: null },
+            { id: 'resposta-1', content: 'Resposta', image: '[]', state: 'DRAFT', deletedAt: null },
+          ]),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          changePostStatus,
+        },
+        integrations: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'blog',
+            providerIdentifier: 'wordpress',
+            deletedAt: null,
+            disabled: false,
+          }),
+        },
+        manager: {
+          getSocialIntegration: jest.fn().mockReturnValue({}),
+        },
+      });
+
+      const error = await service
+        .approveComposition('org', 'composicao')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(400);
+      expect((error as Error).message).toContain('does not publish comments');
+      expect(claimApproval).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('rascunho movido para outro canal no painel', () => {
+    it('grava na composição o canal atual de cada post ao aprovar', async () => {
+      const finishApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const draft = {
+        id: 'raiz',
+        integrationId: 'outro-canal',
+        settings: '{}',
+        content: 'Legenda',
+        image: '[]',
+        state: 'DRAFT',
+        deletedAt: null,
+      };
+      const service = serviceWith({
+        repository: {
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimApproval: jest.fn().mockResolvedValue({ count: 1 }),
+          holdApproval: jest.fn().mockResolvedValue({ count: 1 }),
+          finishApproval,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue(draft),
+          getPostsRecursively: jest.fn().mockResolvedValue([draft]),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          changePostStatus: jest.fn(),
+          changeState: jest.fn(),
+        },
+        integrations: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'outro-canal',
+            providerIdentifier: 'x',
+            deletedAt: null,
+            disabled: false,
+          }),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe: jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } }),
+          }),
+        },
+      });
+
+      await service.approveComposition('org', 'composicao');
+
+      expect(finishApproval).toHaveBeenCalledWith(
+        'composicao',
+        expect.any(String),
+        JSON.stringify([{ postId: 'raiz', integration: 'outro-canal', target: 0 }])
+      );
+    });
+  });
+});

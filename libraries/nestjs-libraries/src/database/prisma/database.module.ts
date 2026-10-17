@@ -25,6 +25,8 @@ import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
 import { DeepgramService } from '@gitroom/nestjs-libraries/deepgram/deepgram.service';
 import { ClippingService } from '@gitroom/nestjs-libraries/database/prisma/clipping/clipping.service';
 import { ClippingRepository } from '@gitroom/nestjs-libraries/database/prisma/clipping/clipping.repository';
+import { CompositionService } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.service';
+import { CompositionRepository } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.repository';
 import { AgenciesService } from '@gitroom/nestjs-libraries/database/prisma/agencies/agencies.service';
 import { AgenciesRepository } from '@gitroom/nestjs-libraries/database/prisma/agencies/agencies.repository';
 import { TrackService } from '@gitroom/nestjs-libraries/track/track.service';
@@ -92,6 +94,8 @@ import { AdminStatsService } from '@gitroom/nestjs-libraries/database/prisma/adm
     DeepgramService,
     ClippingService,
     ClippingRepository,
+    CompositionService,
+    CompositionRepository,
     FalService,
     EmailService,
     TrackService,

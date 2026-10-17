@@ -25,6 +25,7 @@ model Organization {
   Comments            Comments[]
   credits             Credits[]
   clippings           Clipping[]
+  compositions        Composition[]
   customers           Customer[]
   errors              Errors[]
   github              GitHub[]
@@ -330,6 +331,27 @@ model ClippingClip {
   clipping   Clipping  @relation(fields: [clippingId], references: [id])
 
   @@index([clippingId])
+}
+
+model Composition {
+  id               String       @id @default(uuid())
+  organizationId   String
+  status           String       @default("pending")
+  format           String
+  publishDate      DateTime
+  requiresApproval Boolean      @default(false)
+  payload          String
+  media            String?
+  posts            String?
+  error            String?
+  schedulingLease  String?
+  deletedAt        DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  organization     Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([deletedAt])
 }
 
 model Subscription {

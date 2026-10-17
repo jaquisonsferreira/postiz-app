@@ -105,7 +105,8 @@ export class MediaService {
   async generateImage(
     prompt: string,
     org: Organization,
-    generatePromptFirst?: boolean
+    generatePromptFirst?: boolean,
+    isVertical = false
   ) {
     try {
       const generating = await this._subscriptionService.useCredit(
@@ -116,7 +117,7 @@ export class MediaService {
             prompt = await this._openAi.generatePromptForPicture(prompt);
             console.log('Prompt:', prompt);
           }
-          return this._openAi.generateImage(prompt);
+          return this._openAi.generateImage(prompt, isVertical);
         }
       );
 

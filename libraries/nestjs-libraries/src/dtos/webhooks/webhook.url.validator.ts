@@ -27,16 +27,19 @@ export function isBlockedIPv4(ip: string): boolean {
   );
 }
 
+// Checked on the canonical spelling (lowercase, zeros compressed) and on the
+// bits of the first group, so a range holds however the address was written
 export function isBlockedIPv6(ip: string): boolean {
-  const normalized = ip.toLowerCase();
+  if (net.isIP(ip) !== 6) return true;
+  const canonical = new URL(`https://[${ip}]/`).hostname.slice(1, -1);
+  const first = canonical.startsWith('::') ? 0 : parseInt(canonical.split(':')[0], 16);
 
   return (
-    normalized === '::1' ||          // loopback
-    normalized === '::' ||           // unspecified
-    normalized.startsWith('fe80:') || // link-local
-    normalized.startsWith('fc') ||   // unique local fc00::/7
-    normalized.startsWith('fd') ||   // unique local fd00::/7
-    normalized.startsWith('ff')      // multicast
+    canonical === '::1' ||           // loopback
+    canonical === '::' ||            // unspecified
+    (first & 0xffc0) === 0xfe80 ||   // link-local fe80::/10
+    (first & 0xfe00) === 0xfc00 ||   // unique local fc00::/7
+    (first & 0xff00) === 0xff00      // multicast ff00::/8
   );
 }
 
@@ -46,65 +49,71 @@ export function isBlockedIp(ip: string): boolean {
     return isBlockedIPv4(ip);
   }
   if (version === 6) {
-    // IPv4-mapped IPv6 (::ffff:a.b.c.d) — extract and check as IPv4
-    const mapped = ip.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    // IPv4-mapped IPv6 has many spellings (::ffff:a.b.c.d, ::ffff:7f00:1,
+    // 0:0:0:0:0:ffff:...), so it is canonicalized first, then checked as IPv4
+    const canonical = new URL(`https://[${ip}]/`).hostname;
+    const mapped = canonical.match(/^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/);
     if (mapped) {
-      return isBlockedIPv4(mapped[1]);
+      const [high, low] = [parseInt(mapped[1], 16), parseInt(mapped[2], 16)];
+      return isBlockedIPv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
     }
     return isBlockedIPv6(ip);
   }
   return true;
 }
 
-export async function isSafePublicHttpsUrl(value: unknown): Promise<boolean> {
+// "unresolved" is a lookup that failed (a resolver timeout, EAI_AGAIN): the
+// same URL may resolve on a retry, while "blocked" never becomes safe
+export type PublicHttpsUrlCheck = 'safe' | 'blocked' | 'unresolved';
+
+export async function checkPublicHttpsUrl(value: unknown): Promise<PublicHttpsUrlCheck> {
   if (typeof value !== 'string' || !value.trim()) {
-    return false;
+    return 'blocked';
   }
 
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    return false;
+    return 'blocked';
   }
 
   if (parsed.protocol !== 'https:') {
-    return false;
+    return 'blocked';
   }
 
   if (!parsed.hostname) {
-    return false;
+    return 'blocked';
   }
 
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
 
   if (hostname === 'localhost') {
-    return false;
+    return 'blocked';
   }
 
   // If user supplied a literal IP directly, validate it immediately
   const literalIpVersion = net.isIP(hostname);
   if (literalIpVersion) {
-    return !isBlockedIp(hostname);
+    return isBlockedIp(hostname) ? 'blocked' : 'safe';
   }
 
+  let records: { address: string }[];
   try {
-    const records = await dns.lookup(hostname, { all: true });
-
-    if (!records.length) {
-      return false;
-    }
-
-    for (const record of records) {
-      if (isBlockedIp(record.address)) {
-        return false;
-      }
-    }
-
-    return true;
+    records = await dns.lookup(hostname, { all: true });
   } catch {
-    return false;
+    return 'unresolved';
   }
+
+  if (!records.length) {
+    return 'unresolved';
+  }
+
+  return records.some((record) => isBlockedIp(record.address)) ? 'blocked' : 'safe';
+}
+
+export async function isSafePublicHttpsUrl(value: unknown): Promise<boolean> {
+  return (await checkPublicHttpsUrl(value)) === 'safe';
 }
 
 @ValidatorConstraint({ name: 'IsSafeWebhookUrl', async: true })
