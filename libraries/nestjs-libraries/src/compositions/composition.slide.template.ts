@@ -222,7 +222,7 @@ body { width: ${size.width}px; height: ${size.height}px; overflow: hidden; }
 .kicker { flex: 0 1 ${KICKER_SHARE * 100}%; min-width: 0; overflow-wrap: anywhere; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
 .brand { flex: 0 1 auto; max-width: ${BRAND_SHARE * 100}%; min-width: 0; overflow-wrap: anywhere; text-align: right; justify-content: flex-end; display: flex; align-items: center; gap: ${Math.round(16 * scale)}px; }
 .handle { max-width: ${HANDLE_SHARE * 100}%; min-width: 0; }
-.logo { height: ${Math.round(56 * scale)}px; width: auto; }
+.logo { height: ${Math.round(56 * scale)}px; width: auto; min-width: 0; max-width: 100%; object-fit: contain; object-position: right center; }
 .text { min-width: 0; display: flex; flex-direction: column; gap: ${Math.round(32 * scale)}px; margin-top: ${backgroundImage ? 'auto' : '0'}; }
 h1 { margin: 0; font-family: '${brand.headingFont}', sans-serif; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; font-size: ${fonts.headline}px; }
 p { margin: 0; font-size: ${fonts.body}px; line-height: 1.4; font-weight: 500; opacity: 0.92; white-space: pre-line; }

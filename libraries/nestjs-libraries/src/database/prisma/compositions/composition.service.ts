@@ -477,7 +477,12 @@ export class CompositionService {
       return composition.media;
     }
 
-    await this._compositionRepository.updateComposition(id, { status: 'rendering' });
+    const claimed = await this._compositionRepository.claimRendering(id);
+    if (!claimed.count) {
+      throw new CompositionValidationError(
+        'The composition was deleted, failed or rendered by another attempt'
+      );
+    }
     const brand = await this.brand(composition.body);
     const size = SIZES[composition.body.size || 'portrait'];
     const media = [...composition.media];

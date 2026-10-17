@@ -107,6 +107,23 @@ export class CompositionRepository {
     });
   }
 
+  // Rendering starts only before scheduling: an attempt that resumes after a
+  // retry already scheduled the composition claims nothing
+  claimRendering(id: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: {
+          in: ['pending', 'rendering'],
+        },
+      },
+      data: {
+        status: 'rendering',
+      },
+    });
+  }
+
   // Scheduling starts only before it finished: an attempt that resumes after
   // another one scheduled the composition claims nothing
   claimScheduling(id: string) {
