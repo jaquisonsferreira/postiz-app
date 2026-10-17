@@ -1,14 +1,7 @@
 'use client';
 
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
-import React, {
-  FC,
-  Ref,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import React, { FC, Ref, useCallback, useEffect, useMemo } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { showMediaBox } from '@gitroom/frontend/components/media/media.component';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
@@ -20,7 +13,7 @@ import clsx from 'clsx';
 import { TeamsComponent } from '@gitroom/frontend/components/settings/teams.component';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { LogoutComponent } from '@gitroom/frontend/components/layout/logout.component';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { PublicComponent } from '@gitroom/frontend/components/public-api/public.component';
 import Link from 'next/link';
@@ -29,7 +22,7 @@ import { Sets } from '@gitroom/frontend/components/sets/sets';
 import { SignaturesComponent } from '@gitroom/frontend/components/settings/signatures.component';
 import { Autopost } from '@gitroom/frontend/components/autopost/autopost';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { SVGLine } from '@gitroom/frontend/components/launches/launches.component';
+import { Card } from '@gitroom/frontend/components/ui/card';
 import { GlobalSettings } from '@gitroom/frontend/components/settings/global.settings';
 import { AppsComponent } from '@gitroom/frontend/components/settings/apps.component';
 import { ThirdPartyComponent } from '@gitroom/frontend/components/third-parties/third-party.component';
@@ -55,6 +48,8 @@ export const SettingsPopup: FC<{
     return modal.closeAll();
   }, []);
   const url = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const showLogout = !url.get('onboarding') || user?.tier?.current === 'FREE';
   const loadProfile = useCallback(async () => {
     const personal = await (await fetch('/user/personal')).json();
@@ -86,7 +81,10 @@ export const SettingsPopup: FC<{
   const t = useT();
   const list = useMemo(() => {
     const arr = [];
-    arr.push({ tab: 'global_settings', label: t('global_settings', 'Global Settings') });
+    arr.push({
+      tab: 'global_settings',
+      label: t('global_settings', 'Global Settings'),
+    });
     // Populate tabs based on user permissions
     if (user?.tier?.public_api && isGeneral && showLogout) {
       arr.push({ tab: 'agents', label: t('agents', 'Agents') });
@@ -113,62 +111,62 @@ export const SettingsPopup: FC<{
     return arr;
   }, [user, isGeneral, showLogout, t]);
 
-  const [tab, setTab] = useState(() => {
-    const requested = url.get('tab');
-    return list.some((p) => p.tab === requested)
-      ? requested!
-      : 'global_settings';
-  });
+  const requestedTab = url.get('tab');
+  const tab = list.some((p) => p.tab === requestedTab)
+    ? requestedTab!
+    : 'global_settings';
+  const setTab = useCallback(
+    (next: string) => {
+      const params = new URLSearchParams(url.toString());
+      params.set('tab', next);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [url, pathname]
+  );
 
   useEffect(() => {
     loadProfile();
   }, []);
 
   return (
-    <>
-      <div className="bg-newBgColorInner p-[20px] mobile:p-[12px] flex flex-col transition-all w-[260px] mobile:w-full">
-        <div className="flex flex-1 flex-col gap-[15px] mobile:flex-row mobile:gap-[8px] mobile:overflow-x-auto mobile:pb-[6px] scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+    <div className="flex-1 min-w-0 flex gap-[20px] mobile:flex-col">
+      <Card className="w-[280px] shrink-0 self-start !p-[16px] mobile:w-full mobile:self-stretch">
+        <div
+          role="tablist"
+          aria-label={t('settings_sections', 'Settings sections')}
+          className="flex flex-col gap-[4px] mobile:flex-row mobile:overflow-x-auto"
+        >
           {list.map(({ tab: tabKey, label }) => (
-            <div
+            <button
               key={tabKey}
-              className={clsx(
-                'cursor-pointer flex items-center gap-[12px] group/profile hover:bg-boxHover rounded-e-[8px] mobile:shrink-0 mobile:whitespace-nowrap mobile:rounded-[8px] mobile:px-[12px] mobile:py-[8px]',
-                tabKey === tab && 'bg-boxHover'
-              )}
+              type="button"
+              role="tab"
+              aria-selected={tabKey === tab}
               onClick={() => setTab(tabKey)}
+              className={clsx(
+                'h-[44px] px-[20px] rounded-full text-[15px] text-start shrink-0 whitespace-nowrap transition-colors',
+                tabKey === tab
+                  ? 'bg-ink text-inkText'
+                  : 'text-newTextColor/80 hover:bg-newBgColor'
+              )}
             >
-              <div
-                className={clsx(
-                  'h-full w-[4px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity mobile:hidden',
-                  tabKey === tab && 'opacity-100'
-                )}
-              >
-                <SVGLine />
-              </div>
               {label}
-            </div>
+            </button>
           ))}
         </div>
-        <div>
-          {showLogout && (
-            <div className="mt-4 mobile:mt-[8px]">
-              <LogoutComponent />
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="bg-newBgColorInner flex-1 min-w-0 flex-col flex p-[20px] mobile:p-[12px] gap-[12px]">
+        {showLogout && (
+          <div className="px-[20px] py-[8px] text-[15px] font-[500]">
+            <LogoutComponent />
+          </div>
+        )}
+      </Card>
+      <Card testId="settings-content" className="flex-1 min-w-0">
         <FormProvider {...form}>
           <form onSubmit={form.handleSubmit(submit)}>
             {!!getRef && (
               <button type="submit" className="hidden" ref={getRef}></button>
             )}
-            <div
-              className={clsx(
-                'w-full mx-auto gap-[24px] flex flex-col relative',
-                !getRef && 'rounded-[4px]'
-              )}
-            >
+            <div className="w-full mx-auto gap-[24px] flex flex-col relative">
               {tab === 'global_settings' && (
                 <div>
                   <GlobalSettings />
@@ -243,8 +241,8 @@ export const SettingsPopup: FC<{
             </div>
           </form>
         </FormProvider>
-      </div>
-    </>
+      </Card>
+    </div>
   );
 };
 export const SettingsComponent = () => {

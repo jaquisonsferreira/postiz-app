@@ -1322,5 +1322,6 @@
   "preview_share": "Compartilhar",
   "preview_repost": "Repostar",
   "preview_send": "Enviar",
-  "preview_pages": "{{total}} páginas"
+  "preview_pages": "{{total}} páginas",
+  "settings_sections": "Seções das configurações"
 }

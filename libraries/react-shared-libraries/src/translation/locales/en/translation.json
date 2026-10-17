@@ -1324,5 +1324,6 @@
   "preview_share": "Share",
   "preview_repost": "Repost",
   "preview_send": "Send",
-  "preview_pages": "{{total}} pages"
+  "preview_pages": "{{total}} pages",
+  "settings_sections": "Settings sections"
 }

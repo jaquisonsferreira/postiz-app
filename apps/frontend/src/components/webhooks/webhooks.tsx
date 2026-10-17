@@ -69,7 +69,7 @@ export const Webhooks: FC = () => {
           'Webhooks are a way to get notified when something happens in Postiz via\n        an HTTP request.'
         )}
       </div>
-      <div className="my-[16px] mt-[16px] bg-sixth border-fifth items-center border rounded-[4px] p-[24px] flex gap-[24px]">
+      <div className="my-[16px] mt-[16px] bg-sixth border-fifth items-center border rounded-[24px] p-[24px] flex gap-[24px]">
         <div className="flex flex-col w-full">
           {!!data?.length && (
             <div className="grid grid-cols-[1fr,1fr,1fr,1fr] w-full gap-y-[10px]">
