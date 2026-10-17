@@ -58,6 +58,7 @@ const serviceWith = ({
   temporal = {},
   integrations = {},
   subscriptions = {},
+  manager = {},
 }: {
   repository?: Record<string, unknown>;
   posts?: Record<string, unknown>;
@@ -65,6 +66,7 @@ const serviceWith = ({
   temporal?: Record<string, unknown>;
   integrations?: Record<string, unknown>;
   subscriptions?: Record<string, unknown>;
+  manager?: Record<string, unknown>;
 }) =>
   new CompositionService(
     repository as unknown as CompositionRepository,
@@ -73,8 +75,21 @@ const serviceWith = ({
     media as unknown as MediaService,
     subscriptions as unknown as SubscriptionService,
     { client: temporal } as unknown as TemporalService,
-    {} as unknown as IntegrationManager
+    manager as unknown as IntegrationManager
   );
+
+// The in-memory Redis of the tests runs no scripts, so the two the locks send
+// (compare the token, then renew or delete) are run here on its data
+const readRedis = ioRedis.get.bind(ioRedis);
+const redisEval = jest.fn(
+  async (script: string, _keys: number, key: string, token: string, seconds?: number) => {
+    if ((await readRedis(key)) !== token) {
+      return 0;
+    }
+    return script.includes("'del'") ? ioRedis.del(key) : ioRedis.expire(key, Number(seconds));
+  }
+);
+Object.assign(ioRedis, { eval: redisEval });
 
 describe('CompositionService', () => {
   it.each([
@@ -229,7 +244,8 @@ describe('CompositionService', () => {
 
     const withPlan = (
       subscription: { subscriptionTier: string; createdAt: Date } | null,
-      used: number
+      used: number,
+      members: Record<string, unknown>[] = thread
     ) => {
       const changePostStatus = jest.fn();
       const changeState = jest.fn();
@@ -256,7 +272,7 @@ describe('CompositionService', () => {
         },
         posts: {
           getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'DRAFT', deletedAt: null }),
-          getPostsRecursively: jest.fn().mockResolvedValue(thread),
+          getPostsRecursively: jest.fn().mockResolvedValue(members),
           validatePosts: jest.fn().mockResolvedValue([]),
           countPostsFromDay,
           changePostStatus,
@@ -265,10 +281,13 @@ describe('CompositionService', () => {
         integrations: {
           getIntegrationById: jest
             .fn()
-            .mockResolvedValue({ id: 'canal', deletedAt: null, disabled: false }),
+            .mockResolvedValue({ id: 'canal', providerIdentifier: 'x', deletedAt: null, disabled: false }),
         },
         subscriptions: {
           getSubscription: jest.fn().mockResolvedValue(subscription),
+        },
+        manager: {
+          getSocialIntegration: jest.fn().mockReturnValue({ comment: jest.fn() }),
         },
         temporal: {
           getWorkflowHandle: jest.fn().mockResolvedValue({
@@ -302,6 +321,18 @@ describe('CompositionService', () => {
       await service.schedule('composicao');
 
       expect(countPostsFromDay).toHaveBeenCalledWith('org', periodStart.add(2, 'month').toDate());
+      expect(changePostStatus).toHaveBeenCalledWith('org', 'raiz', 'schedule');
+    });
+
+    it('conta só as respostas que ainda são rascunho quando uma tentativa parou no meio do fio', async () => {
+      const { service, changePostStatus } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999999,
+        [thread[0], { ...thread[1], state: 'QUEUE' }, { ...thread[2], state: 'QUEUE' }]
+      );
+
+      await service.schedule('composicao');
+
       expect(changePostStatus).toHaveBeenCalledWith('org', 'raiz', 'schedule');
     });
 
@@ -810,7 +841,8 @@ describe('CompositionService', () => {
     });
 
     it('para de enfileirar quando a trava passou para outra composição', async () => {
-      jest.spyOn(ioRedis, 'get').mockResolvedValue('de outra composição');
+      // the lock holds another composition's token when this one renews it
+      redisEval.mockResolvedValueOnce(0);
       const { service, changePostStatus } = scheduling();
 
       const error = await service.schedule('composicao').catch((err: unknown) => err);
@@ -865,5 +897,111 @@ describe('CompositionService', () => {
       expect(set.mock.calls.length).toBeGreaterThanOrEqual(2);
       expect(generateImage).toHaveBeenCalledTimes(1);
     }, 60000);
+
+    it('renova e libera a trava com uma única operação condicional no Redis', async () => {
+      const set = jest.spyOn(ioRedis, 'set');
+      const get = jest.spyOn(ioRedis, 'get');
+      redisEval.mockClear();
+      const { service } = scheduling();
+
+      await service.schedule('composicao');
+
+      const key = set.mock.calls[0][0];
+      expect(get.mock.calls.filter(([read]) => read === key)).toEqual([]);
+      expect(redisEval.mock.calls.filter((call) => call[2] === key).length).toBeGreaterThanOrEqual(3);
+      expect(await ioRedis.get(key as string)).toBeFalsy();
+    });
+
+    it('reaproveita o fundo que outra renderização gerou enquanto esperava a trava de créditos', async () => {
+      const image = `data:image/png;base64,${(
+        await sharp({ create: { width: 4, height: 4, channels: 3, background: '#6D4AFF' } })
+          .png()
+          .toBuffer()
+      ).toString('base64')}`;
+      const read = ioRedis.get.bind(ioRedis);
+      let backgroundReads = 0;
+      jest.spyOn(ioRedis, 'get').mockImplementation(async (key: unknown) => {
+        if (String(key).includes(':background:')) {
+          backgroundReads++;
+          // the other render saves the image while this one waits for the lock
+          return backgroundReads === 1 ? null : image;
+        }
+        return read(key as string);
+      });
+      const checkCredits = jest.fn().mockResolvedValue({ credits: 0 });
+      const generateImage = jest.fn();
+      const saveMedia = jest.fn().mockResolvedValue({ count: 1 });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título', background: { type: 'ai', prompt: 'um céu roxo' } }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+          saveMedia,
+        },
+        media: {
+          generateImage,
+          saveFile: jest.fn().mockResolvedValue({ id: 'midia', path: '/uploads/slide.png' }),
+        },
+        subscriptions: { checkCredits },
+      });
+
+      await service.renderMedia('composicao-fundo-de-outra');
+
+      expect(generateImage).not.toHaveBeenCalled();
+      expect(checkCredits).not.toHaveBeenCalled();
+      expect(saveMedia).toHaveBeenCalled();
+    }, 60000);
+  });
+
+  describe('canal sem comentários na aprovação', () => {
+    it('recusa um fio movido no painel para um canal que não publica comentários', async () => {
+      const claimApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const changePostStatus = jest.fn();
+      const service = serviceWith({
+        repository: {
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimApproval,
+        },
+        posts: {
+          getPostsRecursively: jest.fn().mockResolvedValue([
+            { id: 'raiz', integrationId: 'blog', settings: '{}', content: 'Fio', image: '[]', state: 'DRAFT', deletedAt: null },
+            { id: 'resposta-1', content: 'Resposta', image: '[]', state: 'DRAFT', deletedAt: null },
+          ]),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          changePostStatus,
+        },
+        integrations: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'blog',
+            providerIdentifier: 'wordpress',
+            deletedAt: null,
+            disabled: false,
+          }),
+        },
+        manager: {
+          getSocialIntegration: jest.fn().mockReturnValue({}),
+        },
+      });
+
+      const error = await service
+        .approveComposition('org', 'composicao')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(400);
+      expect((error as Error).message).toContain('does not publish comments');
+      expect(claimApproval).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
   });
 });
