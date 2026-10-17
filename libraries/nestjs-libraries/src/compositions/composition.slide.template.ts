@@ -95,15 +95,54 @@ export const resolveSlideTheme = (
   return 'light';
 };
 
-const headlineSize = (headline: string, width: number): number => {
-  const scale = width / 1080;
-  if (headline.length <= 40) {
-    return Math.round(92 * scale);
+const HEADLINE_LINE_HEIGHT = 1.05;
+const BODY_LINE_HEIGHT = 1.4;
+// average glyph width as a share of the font size, kept on the wide side so
+// the estimate errs towards smaller text rather than clipped text
+const HEADLINE_GLYPH = 0.6;
+const BODY_GLYPH = 0.56;
+
+const estimateHeight = (
+  text: string,
+  fontSize: number,
+  glyph: number,
+  lineHeight: number,
+  width: number
+): number => {
+  const perLine = Math.max(1, Math.floor(width / (fontSize * glyph)));
+  const lines = text
+    .split('\n')
+    .reduce((total, paragraph) => total + Math.max(1, Math.ceil(paragraph.length / perLine)), 0);
+  return lines * fontSize * lineHeight;
+};
+
+// Scripts are off in the renderer, so the text can't be measured on the page:
+// the sizes start from the design's and shrink until the estimate fits
+export const fitTextSizes = (
+  slide: SlideContent,
+  size: SlideSize
+): { headline: number; body: number } => {
+  const scale = size.width / 1080;
+  const padding = 88 * scale;
+  const width = size.width - padding * 2;
+  const chrome = padding * 2 + 2 * 40 * scale + 2 * 32 * scale;
+  const available = size.height - chrome;
+  const headline = slide.headline || '';
+  const startHeadline =
+    (headline.length <= 40 ? 92 : headline.length <= 80 ? 76 : 60) * scale;
+  const startBody = 38 * scale;
+
+  for (let factor = 1; factor > 0.3; factor -= 0.02) {
+    const headlineFont = startHeadline * factor;
+    const bodyFont = startBody * factor;
+    const height =
+      (headline ? estimateHeight(headline, headlineFont, HEADLINE_GLYPH, HEADLINE_LINE_HEIGHT, width) : 0) +
+      (slide.body ? estimateHeight(slide.body, bodyFont, BODY_GLYPH, BODY_LINE_HEIGHT, width) + 32 * scale : 0);
+    if (height <= available) {
+      return { headline: Math.floor(headlineFont), body: Math.floor(bodyFont) };
+    }
   }
-  if (headline.length <= 80) {
-    return Math.round(76 * scale);
-  }
-  return Math.round(60 * scale);
+  return { headline: Math.floor(startHeadline * 0.3), body: Math.floor(startBody * 0.3) };
 };
 
 const googleFontsUrl = (headingFont: string, bodyFont: string): string => {
@@ -144,6 +183,7 @@ export const buildSlideHtml = (input: SlideTemplateInput): string => {
     backgroundImage || theme !== 'light' ? brand.lightColor : brand.darkColor;
   const scale = size.width / 1080;
   const padding = Math.round(88 * scale);
+  const fonts = fitTextSizes(slide, size);
 
   const brandName = input.brand.name ? escapeHtml(input.brand.name) : '';
   const handle = input.brand.handle ? escapeHtml(input.brand.handle) : '';
@@ -168,8 +208,8 @@ body { width: ${size.width}px; height: ${size.height}px; overflow: hidden; }
 .brand { display: flex; align-items: center; gap: ${Math.round(16 * scale)}px; }
 .logo { height: ${Math.round(56 * scale)}px; width: auto; }
 .text { display: flex; flex-direction: column; gap: ${Math.round(32 * scale)}px; margin-top: ${backgroundImage ? 'auto' : '0'}; }
-h1 { margin: 0; font-family: '${brand.headingFont}', sans-serif; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; font-size: ${headlineSize(slide.headline || '', size.width)}px; }
-p { margin: 0; font-size: ${Math.round(38 * scale)}px; line-height: 1.4; font-weight: 500; opacity: 0.92; white-space: pre-line; }
+h1 { margin: 0; font-family: '${brand.headingFont}', sans-serif; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; font-size: ${fonts.headline}px; }
+p { margin: 0; font-size: ${fonts.body}px; line-height: 1.4; font-weight: 500; opacity: 0.92; white-space: pre-line; }
 </style>
 </head>
 <body>

@@ -44,11 +44,14 @@ describe('layout do slide', () => {
     const text = await page.locator('.text').boundingBox();
     const bottom = await page.locator('.bottom').boundingBox();
     const top = await page.locator('.top').boundingBox();
+    const kicker = await page.locator('.kicker').boundingBox();
     await page.close();
 
     expect(text && bottom && top).toBeTruthy();
     expect(text!.y).toBeGreaterThanOrEqual(top!.y + top!.height);
     expect(text!.y + text!.height).toBeLessThanOrEqual(bottom!.y);
     expect(bottom!.y + bottom!.height).toBeLessThanOrEqual(size.height);
+    expect(kicker!.x + kicker!.width).toBeLessThanOrEqual(size.width);
+    expect(text!.x + text!.width).toBeLessThanOrEqual(size.width);
   });
 });
