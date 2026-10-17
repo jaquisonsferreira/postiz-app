@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     bash \
     nginx \
+    fonts-noto-color-emoji \
 && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system www \
@@ -17,12 +18,15 @@ RUN addgroup --system www \
 
 RUN npm --no-update-notifier --no-fund --global install pnpm@10.6.1 pm2
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 WORKDIR /app
 
 COPY . /app
 COPY var/docker/nginx.conf /etc/nginx/nginx.conf
 
 RUN pnpm install
+RUN pnpm exec playwright-core install --with-deps chromium
 RUN NODE_OPTIONS="--max-old-space-size=4096" pnpm run build
 
 CMD ["sh", "-c", "nginx && pnpm run pm2"]
