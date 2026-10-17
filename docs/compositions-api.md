@@ -81,7 +81,7 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
 
 ## Aprovar
 
-`POST /public/v1/compositions/:id/approve`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e retorna a composição com `status: "scheduled"`. Com a cobrança ativa, responde `402` se os posts passarem do limite mensal do plano. Uma aprovação por vez: outra enviada enquanto a primeira enfileira os posts responde `400`, e uma que parou no meio pode ser reenviada depois de dois minutos.
+`POST /public/v1/compositions/:id/approve`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e retorna a composição com `status: "scheduled"`. Com a cobrança ativa, responde `402` se os posts passarem do limite mensal do plano. Cada rascunho é conferido de novo logo antes de entrar na fila: um editado no painel que não passa nas checagens do canal interrompe a aprovação com `400`, e ela pode ser reenviada depois de corrigido. Uma aprovação por vez: outra enviada enquanto a primeira enfileira os posts responde `400`, e uma que parou no meio pode ser reenviada depois de dois minutos.
 
 ## Excluir
 
