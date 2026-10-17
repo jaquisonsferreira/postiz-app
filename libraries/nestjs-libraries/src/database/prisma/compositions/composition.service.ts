@@ -58,6 +58,11 @@ const REMOTE_IMAGE_TIMEOUT_MS = 30000;
 const MAX_REMOTE_REDIRECTS = 3;
 const MAX_PAGE = 10000;
 
+const safePage = (page: number): number => {
+  const requested = Number(page);
+  return Number.isFinite(requested) ? Math.min(MAX_PAGE, Math.max(0, Math.floor(requested))) : 0;
+};
+
 // Every composition on this worker shares the limit, so a burst of carousels
 // never runs more browsers than the publishing workers can live next to
 const renderSlot = pLimit(Number(process.env.COMPOSITION_RENDER_CONCURRENCY) || 2);
@@ -209,12 +214,51 @@ export class CompositionService {
     return this.present(composition);
   }
 
+  // The app shows what was sent along with the status: the slides' text and
+  // each channel's caption, never the provider settings or the AI prompts
+  private presentWithContent(
+    composition: NonNullable<
+      Awaited<ReturnType<CompositionRepository['getCompositionWithContent']>>
+    >
+  ) {
+    const { payload, ...rest } = composition;
+    const body = JSON.parse(payload) as CreateCompositionDto;
+    const slides = (body.slides || []).map(({ kicker, headline, body: text, theme }) => ({
+      kicker,
+      headline,
+      body: text,
+      theme,
+    }));
+    const targets = body.targets.map(({ integrationId, content }) => ({ integrationId, content }));
+    return {
+      ...this.present(rest),
+      title: slides[0]?.headline || slides[0]?.kicker || targets[0]?.content || '',
+      size: body.size || 'portrait',
+      slides,
+      targets,
+    };
+  }
+
+  async getCompositionWithContent(org: string, id: string) {
+    const composition = await this._compositionRepository.getCompositionWithContent(org, id);
+    if (!composition) {
+      throw new HttpException('Composition not found', 404);
+    }
+    return this.presentWithContent(composition);
+  }
+
+  async getCompositionsWithContent(org: string, page: number, status?: string) {
+    return (
+      await this._compositionRepository.getCompositionsWithContent(org, safePage(page), status)
+    ).map((c) => this.presentWithContent(c));
+  }
+
+  async countCompositions(org: string, status?: string) {
+    return { total: await this._compositionRepository.countCompositions(org, status) };
+  }
+
   async getCompositions(org: string, page: number) {
-    const requested = Number(page);
-    const safePage = Number.isFinite(requested)
-      ? Math.min(MAX_PAGE, Math.max(0, Math.floor(requested)))
-      : 0;
-    return (await this._compositionRepository.getCompositions(org, safePage)).map((c) =>
+    return (await this._compositionRepository.getCompositions(org, safePage(page))).map((c) =>
       this.present(c)
     );
   }

@@ -67,6 +67,49 @@ export class CompositionRepository {
     });
   }
 
+  getCompositionWithContent(org: string, id: string) {
+    return this._composition.model.composition.findFirst({
+      where: {
+        id,
+        organizationId: org,
+        deletedAt: null,
+      },
+      select: {
+        ...PUBLIC_FIELDS,
+        payload: true,
+      },
+    });
+  }
+
+  getCompositionsWithContent(org: string, page: number, status?: string) {
+    return this._composition.model.composition.findMany({
+      where: {
+        organizationId: org,
+        deletedAt: null,
+        ...(status ? { status } : {}),
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20,
+      skip: page * 20,
+      select: {
+        ...PUBLIC_FIELDS,
+        payload: true,
+      },
+    });
+  }
+
+  countCompositions(org: string, status?: string) {
+    return this._composition.model.composition.count({
+      where: {
+        organizationId: org,
+        deletedAt: null,
+        ...(status ? { status } : {}),
+      },
+    });
+  }
+
   getCompositionById(id: string) {
     return this._composition.model.composition.findFirst({
       where: {
