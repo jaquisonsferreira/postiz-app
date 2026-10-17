@@ -1235,7 +1235,7 @@ const CalendarItem: FC<{
     user?.impersonate &&
     post.creationMethod &&
     post.creationMethod !== 'UNKNOWN';
-  const preview = usePostPreview()(post.group);
+  const openPreview = usePostPreview();
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',
@@ -1378,7 +1378,7 @@ const CalendarItem: FC<{
             'hidden group-hover:block hover:underline cursor-pointer',
             post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
           )}
-          onClick={preview}
+          onClick={openPreview(post.group)}
         >
           <Preview />
         </button>

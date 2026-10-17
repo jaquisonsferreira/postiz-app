@@ -9,6 +9,7 @@ import { useMediaDirectory } from '@gitroom/react/helpers/use.media.directory';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { useToaster } from '@gitroom/react/toaster/toaster';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { PillTabs } from '@gitroom/frontend/components/ui/pill.tabs';
 import { PillButton } from '@gitroom/frontend/components/ui/pill.button';
@@ -44,15 +45,16 @@ const usePostGroup = (group: string) => {
 const usePreviewParams = () => {
   const router = useRouter();
   const pathname = usePathname();
+  const search = useSearchParams();
   return useCallback(
     (changes: Record<string, string | null>) => {
-      const params = new URLSearchParams(window.location.search);
+      const params = new URLSearchParams(search.toString());
       Object.entries(changes).forEach(([key, value]) =>
         value ? params.set(key, value) : params.delete(key)
       );
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
-    [pathname]
+    [pathname, search]
   );
 };
 
@@ -86,8 +88,16 @@ const PostPreviewModal: FC<{ group: string; close: () => void }> = ({
   const t = useT();
   const search = useSearchParams();
   const mediaDir = useMediaDirectory();
+  const toaster = useToaster();
   const update = usePreviewParams();
   const { data, isLoading } = usePostGroup(group);
+
+  useEffect(() => {
+    if (!isLoading && !data?.posts?.length) {
+      toaster.show(t('post_not_found', 'Post not found'), 'warning');
+      close();
+    }
+  }, [isLoading, data]);
 
   const [root, ...comments] = data?.posts || [];
   const media = useMemo(

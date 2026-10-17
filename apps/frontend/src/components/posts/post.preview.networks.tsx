@@ -3,7 +3,7 @@
 import { FC, ReactNode } from 'react';
 import clsx from 'clsx';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { hasExtension } from '@gitroom/helpers/utils/has.extension';
+import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
 import { SliderComponent } from '@gitroom/frontend/components/third-parties/slider.component';
 
 export type PreviewFormat = 'text' | 'image' | 'carousel' | 'video' | 'story';
@@ -24,23 +24,9 @@ export interface PreviewNetwork {
   Feed: FC<{ content: PreviewContent; format: PreviewFormat }>;
 }
 
-const Media: FC<{ src: string; className?: string }> = ({ src, className }) =>
-  hasExtension(src, 'mp4') ? (
-    <video
-      src={src}
-      autoPlay
-      muted
-      loop
-      playsInline
-      className={clsx('w-full h-full object-cover', className)}
-    />
-  ) : (
-    <img
-      src={src}
-      alt=""
-      className={clsx('w-full h-full object-cover', className)}
-    />
-  );
+const Media: FC<{ src: string }> = ({ src }) => (
+  <VideoOrImage autoplay={true} src={src} videoClassName="object-cover" />
+);
 
 const EmptyMedia: FC<{ className?: string }> = ({ className }) => {
   const t = useT();
@@ -344,10 +330,7 @@ const LinkedinFeed: PreviewNetwork['Feed'] = ({ content, format }) => {
     <div className="bg-bgLinkedin text-newTextColor border border-borderLinkedin rounded-[12px] py-[12px] flex flex-col gap-[10px]">
       <div className="flex items-center gap-[10px] px-[12px]">
         <Avatar picture={content.picture} size={48} />
-        <span className="flex flex-col">
-          <span className="text-[14px] font-[600]">{content.name}</span>
-          <span className="text-[12px] text-textLinkedin">1h</span>
-        </span>
+        <span className="text-[14px] font-[600]">{content.name}</span>
       </div>
       <Caption text={content.text} className="px-[12px] text-[14px]" />
       {format === 'carousel' ? (
