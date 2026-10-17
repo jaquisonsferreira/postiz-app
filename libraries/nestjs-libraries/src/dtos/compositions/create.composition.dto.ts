@@ -188,6 +188,7 @@ export class CompositionBrandDto {
 export class CompositionTargetDto {
   @IsDefined()
   @IsString()
+  @MaxLength(100)
   integrationId: string;
 
   @IsDefined()
@@ -236,6 +237,7 @@ export class CreateCompositionDto {
   size?: (typeof COMPOSITION_SIZES)[number];
 
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => CompositionBrandDto)
   brand?: CompositionBrandDto;

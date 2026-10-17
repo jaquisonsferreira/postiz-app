@@ -61,10 +61,17 @@ const safePage = (page: number): number => {
   const requested = Number(page);
   return Number.isFinite(requested) ? Math.min(MAX_PAGE, Math.max(0, Math.floor(requested))) : 0;
 };
-// Long enough for a composition to start the publishing of all its channels
-const POSTS_QUEUE_LOCK_MS = 2 * 60 * 1000;
+// The posts queue lock is renewed before each channel, so it only has to
+// outlive the slowest channel. The credits lock covers one AI generation, and
+// a render waits for it instead of failing an attempt
+const POSTS_QUEUE_LOCK_SECONDS = 2 * 60;
+const AI_CREDITS_LOCK_SECONDS = 5 * 60;
+const AI_CREDITS_WAIT_MS = 5 * 60 * 1000;
+const LOCK_RETRY_MS = 1000;
 const postsQueueKey = (organizationId: string): string =>
   `composition:posts-queue:${organizationId}`;
+const aiCreditsKey = (organizationId: string): string =>
+  `composition:ai-credits:${organizationId}`;
 
 const POSTS_LIMIT_MESSAGE =
   'You have reached the maximum number of posts for your subscription. Please upgrade your subscription to add more posts.';
@@ -143,30 +150,77 @@ export class CompositionService {
     return used + needed <= limit;
   }
 
-  // The posts of an organization are counted and queued by one composition at
-  // a time, so two of them never both take the last posts of the month. Only
-  // billing limits the posts, so without it nothing waits. The lock is
-  // released only by its holder, never after it expired and another took it
-  private async withPostsQueue<T>(
-    organizationId: string,
-    busy: () => Error,
-    run: () => Promise<T>
+  // What an organization counts and then spends (its posts of the month, its
+  // AI credits) is done by one composition at a time, so two of them never
+  // both take the last one. Only billing limits them, so without it nothing
+  // waits. The lock is renewed and released only by its holder: one that
+  // expired and was taken by another stops the holder at its next renewal
+  private async withBillingLock<T>(
+    key: string,
+    lock: { seconds: number; waitMs: number; busy: () => Error },
+    run: (renew: () => Promise<void>) => Promise<T>
   ): Promise<T> {
     if (!process.env.STRIPE_PUBLISHABLE_KEY) {
-      return run();
+      return run(async () => undefined);
     }
-    const key = postsQueueKey(organizationId);
     const token = randomUUID();
-    if (!(await ioRedis.set(key, token, 'PX', POSTS_QUEUE_LOCK_MS, 'NX'))) {
-      throw busy();
+    const deadline = Date.now() + lock.waitMs;
+    while (!(await ioRedis.set(key, token, 'EX', lock.seconds, 'NX'))) {
+      if (Date.now() >= deadline) {
+        throw lock.busy();
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
     }
     try {
-      return await run();
+      return await run(async () => {
+        if ((await ioRedis.get(key)) !== token) {
+          throw new Error(`The lock ${key} was taken by another composition`);
+        }
+        await ioRedis.expire(key, lock.seconds);
+      });
     } finally {
       if ((await ioRedis.get(key)) === token) {
         await ioRedis.del(key);
       }
     }
+  }
+
+  // The draft as it is stored now, in the shape the provider checks read
+  private async storedDraft(org: string, post: CompositionPost) {
+    const [root, ...thread] = await this._postsService.getPostsRecursively(
+      post.postId,
+      false,
+      org,
+      true
+    );
+    if (!root || root.deletedAt) {
+      throw new CompositionValidationError(
+        `The post for channel ${post.integration} was deleted, delete the composition and send it again`
+      );
+    }
+    return {
+      state: root.state,
+      post: {
+        integration: { id: root.integrationId },
+        settings: JSON.parse(root.settings || '{}'),
+        value: [root, ...thread].map((item) => ({
+          content: item.content,
+          image: JSON.parse(item.image || '[]'),
+        })),
+      },
+    };
+  }
+
+  // a channel disabled or removed while the composition waited is not
+  // queued: its drafts stay for the user to move to another channel
+  private async assertPublishable(
+    org: string,
+    drafts: Awaited<ReturnType<CompositionService['storedDraft']>>['post'][]
+  ) {
+    for (const draft of drafts) {
+      await this.availableIntegration(org, draft.integration.id);
+    }
+    await this.assertValid(org, drafts);
   }
 
   private present(
@@ -363,50 +417,30 @@ export class CompositionService {
 
   async approveComposition(org: string, id: string) {
     const composition = await this.getComposition(org, id);
-    const stored = [];
-    for (const post of composition.posts) {
-      const [root, ...thread] = await this._postsService.getPostsRecursively(
-        post.postId,
-        false,
-        org,
-        true
-      );
-      if (!root || root.deletedAt) {
-        throw new HttpException(
-          `The post for channel ${post.integration} was deleted, delete the composition and send it again`,
-          400
-        );
-      }
-      stored.push({
-        integration: { id: root.integrationId },
-        settings: JSON.parse(root.settings || '{}'),
-        value: [root, ...thread].map((item) => ({
-          content: item.content,
-          image: JSON.parse(item.image || '[]'),
-        })),
-      });
-    }
     try {
-      // a channel disabled or removed while the composition waited is not
-      // queued: its drafts stay for the user to move to another channel
-      for (const post of stored) {
-        await this.availableIntegration(org, post.integration.id);
+      const stored = [];
+      for (const post of composition.posts) {
+        stored.push((await this.storedDraft(org, post)).post);
       }
-      await this.assertValid(org, stored);
+      await this.assertPublishable(org, stored);
     } catch (err: unknown) {
       if (err instanceof CompositionValidationError) {
         throw new HttpException(err.message, 400);
       }
       throw err;
     }
-    await this.withPostsQueue(
-      org,
-      () =>
-        new HttpException(
-          'Another composition of this organization is being queued, send the approval again',
-          409
-        ),
-      async () => {
+    await this.withBillingLock(
+      postsQueueKey(org),
+      {
+        seconds: POSTS_QUEUE_LOCK_SECONDS,
+        waitMs: 0,
+        busy: () =>
+          new HttpException(
+            'Another composition of this organization is being queued, send the approval again',
+            409
+          ),
+      },
+      async (renew) => {
         if (!(await this.hasPostsLeft(org, composition.posts))) {
           throw new HttpException(POSTS_LIMIT_MESSAGE, 402);
         }
@@ -420,12 +454,27 @@ export class CompositionService {
         }
 
         // the lease is renewed before each post, so an approval sent again while
-        // this one is still starting publishing workflows waits for it
-        await this.queuePosts(org, composition.posts, async () => {
-          if (!(await this._compositionRepository.holdApproval(id, lease)).count) {
-            throw new HttpException(`Composition ${id} is being approved by another request`, 409);
+        // this one is still starting publishing workflows waits for it. Each
+        // draft is checked again right before it is queued, so one edited in
+        // the dashboard while the approval runs is never queued unchecked
+        try {
+          await this.queuePosts(org, composition.posts, async (post) => {
+            if (!(await this._compositionRepository.holdApproval(id, lease)).count) {
+              throw new HttpException(`Composition ${id} is being approved by another request`, 409);
+            }
+            await renew();
+            const draft = await this.storedDraft(org, post);
+            if (draft.state === 'DRAFT') {
+              await this.assertPublishable(org, [draft.post]);
+            }
+          });
+        } catch (err: unknown) {
+          if (err instanceof CompositionValidationError) {
+            await this._compositionRepository.releaseApproval(id, lease);
+            throw new HttpException(err.message, 400);
           }
-        });
+          throw err;
+        }
         if (!(await this._compositionRepository.finishApproval(id, lease)).count) {
           throw new HttpException(`Composition ${id} is being approved by another request`, 409);
         }
@@ -608,25 +657,35 @@ export class CompositionService {
     if (cached) {
       return cached;
     }
-    if (!(await this.hasImageCredits(organization, 1))) {
-      throw new CompositionValidationError('Not enough AI image credits for the backgrounds');
-    }
-    let b64: string | undefined;
-    try {
-      b64 = await this._mediaService.generateImage(
-        background.prompt as string,
-        organization,
-        false,
-        size.height > size.width
-      );
-    } catch (err: unknown) {
-      // a refused prompt (a safety rejection) is refused again on a retry, a
-      // generator that failed (5xx) may answer the next attempt
-      if (err instanceof HttpException && err.getStatus() < 500 && err.getStatus() !== 429) {
-        throw new CompositionValidationError(err.message);
+    const b64 = await this.withBillingLock(
+      aiCreditsKey(organization.id),
+      {
+        seconds: AI_CREDITS_LOCK_SECONDS,
+        waitMs: AI_CREDITS_WAIT_MS,
+        busy: () =>
+          new Error(`Composition ${id} waits for the AI credits of its organization`),
+      },
+      async () => {
+        if (!(await this.hasImageCredits(organization, 1))) {
+          throw new CompositionValidationError('Not enough AI image credits for the backgrounds');
+        }
+        try {
+          return await this._mediaService.generateImage(
+            background.prompt as string,
+            organization,
+            false,
+            size.height > size.width
+          );
+        } catch (err: unknown) {
+          // a refused prompt (a safety rejection) is refused again on a retry, a
+          // generator that failed (5xx) may answer the next attempt
+          if (err instanceof HttpException && err.getStatus() < 500 && err.getStatus() !== 429) {
+            throw new CompositionValidationError(err.message);
+          }
+          throw err;
+        }
       }
-      throw err;
-    }
+    );
     if (!b64) {
       throw new CompositionValidationError('The image generator returned no image');
     }
@@ -744,11 +803,11 @@ export class CompositionService {
   private async queuePosts(
     organizationId: string,
     posts: CompositionPost[],
-    hold: () => Promise<void> = async () => undefined
+    hold: (post: CompositionPost) => Promise<void> = async () => undefined
   ) {
     const started: { post: CompositionPost; replies: string[] }[] = [];
     for (const post of posts) {
-      await hold();
+      await hold(post);
       const existing = await this._postsService.getPostById(post.postId, organizationId);
       if (!existing || existing.deletedAt) {
         throw new CompositionValidationError(
@@ -802,7 +861,8 @@ export class CompositionService {
     id: string,
     organizationId: string,
     requiresApproval: boolean,
-    posts: CompositionPost[]
+    posts: CompositionPost[],
+    renew: () => Promise<void>
   ) {
     // claimed only from a processing state: an attempt that timed out and
     // resumes after a retry finished, an approval or a failure claims nothing,
@@ -825,6 +885,7 @@ export class CompositionService {
         if (!(await this._compositionRepository.holdQueueing(id, lease)).count) {
           throw new Error(`Composition ${id} was changed by another attempt`);
         }
+        await renew();
       });
     }
     const finished = await this._compositionRepository.finishQueueing(
@@ -846,15 +907,19 @@ export class CompositionService {
     posts: CompositionPost[]
   ) {
     if (requiresApproval) {
-      return this.queueScheduling(id, organizationId, requiresApproval, posts);
+      return this.queueScheduling(id, organizationId, requiresApproval, posts, async () => undefined);
     }
-    return this.withPostsQueue(
-      organizationId,
-      () =>
-        new Error(
-          `Composition ${id} waits for another composition of its organization to be queued`
-        ),
-      () => this.queueScheduling(id, organizationId, requiresApproval, posts)
+    return this.withBillingLock(
+      postsQueueKey(organizationId),
+      {
+        seconds: POSTS_QUEUE_LOCK_SECONDS,
+        waitMs: 0,
+        busy: () =>
+          new Error(
+            `Composition ${id} waits for another composition of its organization to be queued`
+          ),
+      },
+      (renew) => this.queueScheduling(id, organizationId, requiresApproval, posts, renew)
     );
   }
 
@@ -952,8 +1017,11 @@ export class CompositionService {
       return;
     }
     // marked failed before the cleanup: a scheduling attempt still running can
-    // no longer save or queue a post once the cleanup has started
-    await this._compositionRepository.markFailed(id, error);
+    // no longer save or queue a post once the cleanup has started. One that
+    // finished the scheduling first keeps it, and nothing is removed
+    if (!(await this._compositionRepository.failProcessing(id, error)).count) {
+      return;
+    }
     const targets = (JSON.parse(composition.payload) as CreateCompositionDto).targets.length;
     const queued: string[] = [];
     for (let target = 0; target < targets; target++) {

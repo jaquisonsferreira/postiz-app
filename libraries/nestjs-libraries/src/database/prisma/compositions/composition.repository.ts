@@ -287,6 +287,25 @@ export class CompositionRepository {
     });
   }
 
+  // Only a composition still being processed fails, or one that failed
+  // already so a cleanup that stopped can run again: an attempt that timed
+  // out and still finished the scheduling keeps its result
+  failProcessing(id: string, error: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: {
+          in: ['pending', 'rendering', 'scheduling', 'queueing', 'failed'],
+        },
+      },
+      data: {
+        status: 'failed',
+        error,
+      },
+    });
+  }
+
   markFailed(id: string, error: string) {
     return this._composition.model.composition.updateMany({
       where: {
@@ -349,6 +368,22 @@ export class CompositionRepository {
       },
       data: {
         schedulingLease: lease,
+      },
+    });
+  }
+
+  // An approval stopped by a draft that can't be published is given back, so
+  // it can be sent again once the draft is fixed
+  releaseApproval(id: string, lease: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: 'approving',
+        schedulingLease: lease,
+      },
+      data: {
+        status: 'awaiting_approval',
       },
     });
   }

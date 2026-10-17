@@ -223,4 +223,18 @@ describe('CreateCompositionDto', () => {
       await errorsOf(payload({ targets: [{ integrationId: 'x-1', content: '  \n ' }] }))
     ).toContain('targets.0.content');
   });
+
+  it('exige a marca como objeto', async () => {
+    expect(await errorsOf(payload({ brand: [] }))).toContain('brand');
+    expect(await errorsOf(payload({ brand: [{ primaryColor: '#112233' }] }))).toContain('brand');
+  });
+
+  it('limita o tamanho do id do canal', async () => {
+    expect(
+      await errorsOf(payload({ targets: [{ integrationId: 'x'.repeat(101), content: 'Legenda' }] }))
+    ).toContain('targets.0.integrationId');
+    expect(
+      await errorsOf(payload({ targets: [{ integrationId: 'x'.repeat(100), content: 'Legenda' }] }))
+    ).toEqual([]);
+  });
 });
