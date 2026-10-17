@@ -209,4 +209,18 @@ describe('CreateCompositionDto', () => {
       )
     ).toEqual([]);
   });
+
+  it('rejeita legenda e comentários vazios ou só com espaços', async () => {
+    expect(
+      await errorsOf(payload({ targets: [{ integrationId: 'x-1', content: 'Fio 1', comments: [''] }] }))
+    ).toContain('targets.0.comments');
+    expect(
+      await errorsOf(
+        payload({ targets: [{ integrationId: 'x-1', content: 'Fio 1', comments: ['Fio 2', ' \n\t '] }] })
+      )
+    ).toContain('targets.0.comments');
+    expect(
+      await errorsOf(payload({ targets: [{ integrationId: 'x-1', content: '  \n ' }] }))
+    ).toContain('targets.0.content');
+  });
 });

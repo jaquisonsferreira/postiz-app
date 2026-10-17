@@ -334,4 +334,145 @@ describe('CompositionService', () => {
       expect(changePostStatus).toHaveBeenCalled();
     });
   });
+
+  describe('post já na fila de uma tentativa que parou', () => {
+    const queued = (workflow: 'RUNNING' | 'missing') => {
+      const calls: string[] = [];
+      const finishQueueing = jest.fn().mockResolvedValue({ count: 1 });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              { format: 'text', targets: [{ integrationId: 'canal', content: 'Fio' }] },
+              [{ postId: 'raiz', integration: 'canal', target: 0 }]
+            )
+          ),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          holdQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'QUEUE', deletedAt: null }),
+          getPostsRecursively: jest
+            .fn()
+            .mockResolvedValue([{ id: 'raiz' }, { id: 'resposta-1' }]),
+          changePostStatus: jest.fn(async (_org: string, id: string) => {
+            calls.push(`workflow ${id}`);
+          }),
+          changeState: jest.fn(async (id: string, state: string) => {
+            calls.push(`${id} ${state}`);
+          }),
+        },
+        temporal: {
+          getWorkflowHandle:
+            workflow === 'RUNNING'
+              ? jest.fn().mockResolvedValue({
+                  describe: jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } }),
+                })
+              : jest.fn().mockRejectedValue(new Error('workflow not found')),
+        },
+      });
+      return { service, calls, finishQueueing };
+    };
+
+    it('devolve a rascunho o post na fila cuja publicação nunca começou, para a próxima tentativa iniciá-la', async () => {
+      const { service, calls, finishQueueing } = queued('missing');
+
+      await expect(service.schedule('composicao')).rejects.toThrow('canal');
+
+      expect(calls).toEqual(['raiz DRAFT', 'resposta-1 DRAFT']);
+      expect(finishQueueing).not.toHaveBeenCalled();
+    });
+
+    it('mantém o post na fila cuja publicação já começou', async () => {
+      const { service, calls, finishQueueing } = queued('RUNNING');
+
+      await service.schedule('composicao');
+
+      expect(calls).toEqual([]);
+      expect(finishQueueing).toHaveBeenCalled();
+    });
+  });
+
+  describe('criação dos rascunhos de um canal', () => {
+    const creating = ({ saved, current }: { saved: boolean; current: unknown }) => {
+      const calls: string[] = [];
+      const stored = storedComposition({
+        format: 'text',
+        requiresApproval: true,
+        targets: [{ integrationId: 'canal', content: 'Legenda' }],
+      });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest
+            .fn()
+            .mockResolvedValueOnce({ ...stored, requiresApproval: true })
+            .mockResolvedValue(current),
+          claimScheduling: jest.fn().mockResolvedValue({ count: 1 }),
+          holdScheduling: jest.fn().mockResolvedValue({ count: 1 }),
+          savePosts: jest.fn().mockResolvedValue({ count: saved ? 1 : 0 }),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        posts: {
+          mapTypeToPost: jest.fn(async (body: unknown) => body),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          deletePost: jest.fn(async (_org: string, group: string) => {
+            calls.push(`delete ${group}`);
+          }),
+          createPost: jest.fn(async () => {
+            calls.push('create');
+            return [{ postId: 'composicao-0-0', integration: 'canal' }];
+          }),
+        },
+        integrations: {
+          getIntegrationById: jest.fn().mockResolvedValue({
+            id: 'canal',
+            providerIdentifier: 'x',
+            deletedAt: null,
+            disabled: false,
+          }),
+        },
+      });
+      return { service, calls };
+    };
+
+    it('não apaga o grupo do canal antes de recriar os posts, que voltam com os mesmos ids', async () => {
+      const { service, calls } = creating({ saved: true, current: null });
+
+      await service.schedule('composicao');
+
+      expect(calls).toEqual(['create']);
+    });
+
+    it('remove o rascunho criado depois que a composição foi excluída', async () => {
+      const { service, calls } = creating({ saved: false, current: null });
+
+      await expect(service.schedule('composicao')).rejects.toThrow();
+
+      expect(calls).toEqual(['create', 'delete composicao-0']);
+    });
+
+    it('remove o rascunho criado depois que a composição falhou', async () => {
+      const { service, calls } = creating({
+        saved: false,
+        current: { id: 'composicao', status: 'failed' },
+      });
+
+      await expect(service.schedule('composicao')).rejects.toThrow();
+
+      expect(calls).toEqual(['create', 'delete composicao-0']);
+    });
+
+    it('deixa o rascunho para a tentativa que assumiu a reserva', async () => {
+      const { service, calls } = creating({
+        saved: false,
+        current: { id: 'composicao', status: 'scheduling' },
+      });
+
+      await expect(service.schedule('composicao')).rejects.toThrow('another attempt');
+
+      expect(calls).toEqual(['create']);
+    });
+  });
 });
