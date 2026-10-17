@@ -94,7 +94,7 @@ export const Plugs = () => {
         <h3 className="text-[20px]">{t('plugs', 'Plugs')}</h3>
       </div>
       {!sortedIntegrations.length ? (
-        <div className="bg-sixth border-fifth border rounded-[4px] p-[24px] flex flex-col gap-[16px] items-start">
+        <div className="bg-sixth border-fifth border rounded-[24px] p-[24px] flex flex-col gap-[16px] items-start">
           <div className="text-customColor18">
             {t(
               'there_are_not_plugs_matching_your_channels',
