@@ -574,14 +574,17 @@ const McpSection = ({
 
 export const localCliSteps = [
   {
+    key: 'cli_step_install',
     label: 'Install the CLI',
     code: 'npm install -g postiz',
   },
   {
+    key: 'cli_step_login',
     label: 'Run: postiz auth:login',
     code: 'postiz auth:login',
   },
   {
+    key: 'cli_step_install_skill',
     label: 'Install the Postiz skill for your AI agent',
     code: 'npx skills add gitroomhq/postiz-agent',
   },
@@ -589,14 +592,17 @@ export const localCliSteps = [
 
 const ciCliSteps = [
   {
+    key: 'cli_step_install',
     label: 'Install the CLI',
     code: 'npm install -g postiz',
   },
   {
+    key: 'cli_step_set_api_key',
     label: 'Set your API key as an environment variable',
     code: 'export POSTIZ_API_KEY="{API_KEY}"',
   },
   {
+    key: 'cli_step_install_skill',
     label: 'Install the Postiz skill for your AI agent',
     code: 'npx skills add gitroomhq/postiz-agent',
   },
@@ -674,7 +680,7 @@ const CliSection = ({ apiKey }: { apiKey: string }) => {
         {displaySteps.map((step, i) => (
           <div key={i} className="flex flex-col gap-[6px]">
             <div className="text-[13px] font-[600] text-customColor18">
-              {i + 1}. {step.label}
+              {i + 1}. {t(step.key, step.label)}
             </div>
             <pre className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-[13px] whitespace-pre-wrap break-all overflow-x-auto leading-[1.6]">
               {step.code}

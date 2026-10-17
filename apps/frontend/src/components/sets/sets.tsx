@@ -35,13 +35,16 @@ const SaveSetModal: FC<{
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div>
         <Input
-          label="Set Name"
+          label={t('set_name', 'Set Name')}
           translationKey="label_set_name"
           name="setName"
           value={name}
           disableForm={true}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Enter a name for this set"
+          placeholder={t(
+            'enter_a_name_for_this_set',
+            'Enter a name for this set'
+          )}
           autoFocus
         />
       </div>
@@ -111,7 +114,7 @@ export const Sets: FC = () => {
             {...(params?.id ? { set: JSON.parse(params.content) } : {})}
             addEditSets={(data) => {
               modal.openModal({
-                title: 'Save as Set',
+                title: t('save_as_set', 'Save as Set'),
                 children: (
                   <SaveSetModal
                     initialValue={params?.name || ''}
@@ -128,9 +131,15 @@ export const Sets: FC = () => {
                         });
                         modal.closeAll();
                         mutate();
-                        toaster.show('Set saved successfully', 'success');
+                        toaster.show(
+                          t('set_saved_successfully', 'Set saved successfully'),
+                          'success'
+                        );
                       } catch (error) {
-                        toaster.show('Failed to save set', 'warning');
+                        toaster.show(
+                          t('failed_to_save_set', 'Failed to save set'),
+                          'warning'
+                        );
                       }
                     }}
                     onCancel={() => modal.closeAll()}
@@ -157,7 +166,10 @@ export const Sets: FC = () => {
           method: 'DELETE',
         });
         mutate();
-        toaster.show('Set deleted successfully', 'success');
+        toaster.show(
+          t('set_deleted_successfully', 'Set deleted successfully'),
+          'success'
+        );
       }
     },
     []
@@ -169,7 +181,10 @@ export const Sets: FC = () => {
     <div className="flex flex-col">
       <h3 className="text-[20px]">Sets ({data?.length || 0})</h3>
       <div className="text-customColor18 mt-[4px]">
-        Manage your content sets for easy reuse across posts.
+        {t(
+          'manage_your_content_sets',
+          'Manage your content sets for easy reuse across posts.'
+        )}
       </div>
       <div className="my-[16px] mt-[16px] bg-sixth border-fifth items-center border rounded-[4px] p-[24px] flex gap-[24px]">
         <div className="flex flex-col w-full">
@@ -202,7 +217,7 @@ export const Sets: FC = () => {
               onClick={addSet()}
               className={clsx((data?.length || 0) > 0 && 'my-[16px]')}
             >
-              Add a set
+              {t('add_a_set', 'Add a set')}
             </Button>
           </div>
         </div>

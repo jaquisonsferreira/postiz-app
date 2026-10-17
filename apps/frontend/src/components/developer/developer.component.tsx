@@ -118,7 +118,10 @@ export const DeveloperComponent: FC = () => {
 
   const createApp = useCallback(async () => {
     if (!name || !redirectUrl) {
-      toaster.show('Name and Redirect URL are required', 'warning');
+      toaster.show(
+        t('name_and_redirect_url_required', 'Name and Redirect URL are required'),
+        'warning'
+      );
       return;
     }
     try {
@@ -137,14 +140,17 @@ export const DeveloperComponent: FC = () => {
       if (result.clientSecret) {
         setPlaintextSecret(result.clientSecret);
         toaster.show(
-          'App created! Copy your client secret now - it will only be shown once.',
+          t(
+            'app_created_copy_secret',
+            'App created! Copy your client secret now - it will only be shown once.'
+          ),
           'success'
         );
       }
       setCreating(false);
       mutate();
     } catch {
-      toaster.show('Failed to create app', 'warning');
+      toaster.show(t('failed_to_create_app', 'Failed to create app'), 'warning');
     }
   }, [name, description, redirectUrl, pictureId]);
 
@@ -159,19 +165,22 @@ export const DeveloperComponent: FC = () => {
           pictureId,
         }),
       });
-      toaster.show('App updated', 'success');
+      toaster.show(t('app_updated', 'App updated'), 'success');
       setEditing(false);
       mutate();
     } catch {
-      toaster.show('Failed to update app', 'warning');
+      toaster.show(t('failed_to_update_app', 'Failed to update app'), 'warning');
     }
   }, [name, description, redirectUrl, pictureId]);
 
   const rotateSecret = useCallback(async () => {
     const approved = await decision.open({
-      title: 'Rotate Client Secret?',
+      title: t('rotate_client_secret', 'Rotate Client Secret?'),
       description:
-        'This will generate a new client secret and invalidate the current one. Any integrations using the old secret will stop working.',
+        t(
+          'rotate_client_secret_description',
+          'This will generate a new client secret and invalidate the current one. Any integrations using the old secret will stop working.'
+        ),
       approveLabel: 'Rotate',
       cancelLabel: 'Cancel',
     });
@@ -183,32 +192,38 @@ export const DeveloperComponent: FC = () => {
       if (result.clientSecret) {
         setPlaintextSecret(result.clientSecret);
         toaster.show(
-          'Secret rotated! Copy your new client secret now.',
+          t(
+            'secret_rotated_copy_secret',
+            'Secret rotated! Copy your new client secret now.'
+          ),
           'success'
         );
         mutate();
       }
     } catch {
-      toaster.show('Failed to rotate secret', 'warning');
+      toaster.show(t('failed_to_rotate_secret', 'Failed to rotate secret'), 'warning');
     }
   }, [decision]);
 
   const deleteApp = useCallback(async () => {
     const approved = await decision.open({
-      title: 'Delete OAuth App?',
+      title: t('delete_oauth_app', 'Delete OAuth App?'),
       description:
-        'This will delete the OAuth application and revoke all user authorizations. This action cannot be undone.',
+        t(
+          'delete_oauth_app_description',
+          'This will delete the OAuth application and revoke all user authorizations. This action cannot be undone.'
+        ),
       approveLabel: 'Delete',
       cancelLabel: 'Cancel',
     });
     if (!approved) return;
     try {
       await fetch('/user/oauth-app', { method: 'DELETE' });
-      toaster.show('OAuth app deleted', 'success');
+      toaster.show(t('oauth_app_deleted', 'OAuth app deleted'), 'success');
       setPlaintextSecret(null);
       mutate();
     } catch {
-      toaster.show('Failed to delete app', 'warning');
+      toaster.show(t('failed_to_delete_app', 'Failed to delete app'), 'warning');
     }
   }, [decision]);
 
@@ -305,7 +320,7 @@ export const DeveloperComponent: FC = () => {
                 className="bg-newBgColorInner border border-newBorder rounded-[8px] px-[16px] h-[44px] text-textColor outline-none"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="My Application"
+                placeholder={t('my_application', 'My Application')}
                 maxLength={100}
               />
             </div>
@@ -317,7 +332,7 @@ export const DeveloperComponent: FC = () => {
                 className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-textColor outline-none min-h-[80px]"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe what your app does"
+                placeholder={t('describe_what_your_app_does', 'Describe what your app does')}
                 maxLength={500}
               />
             </div>
@@ -429,7 +444,7 @@ export const DeveloperComponent: FC = () => {
                 className="bg-newBgColorInner border border-newBorder rounded-[8px] px-[16px] h-[44px] text-textColor outline-none"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="My Application"
+                placeholder={t('my_application', 'My Application')}
                 maxLength={100}
               />
             </div>
@@ -441,7 +456,7 @@ export const DeveloperComponent: FC = () => {
                 className="bg-newBgColorInner border border-newBorder rounded-[8px] p-[16px] text-textColor outline-none min-h-[80px]"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe what your app does"
+                placeholder={t('describe_what_your_app_does', 'Describe what your app does')}
                 maxLength={500}
               />
             </div>
