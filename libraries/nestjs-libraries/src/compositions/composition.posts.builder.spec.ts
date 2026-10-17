@@ -8,7 +8,7 @@ import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositio
 const input = (overrides: Partial<CompositionPostsInput> = {}): CompositionPostsInput => ({
   date: '2026-10-20T12:00:00.000Z',
   requiresApproval: false,
-  group: 'grupo-1',
+  compositionId: 'cmp1',
   media: [
     { id: 'm1', path: 'https://cdn.example.com/1.png' },
     { id: 'm2', path: 'https://cdn.example.com/2.png' },
@@ -71,10 +71,21 @@ describe('buildCompositionPosts', () => {
     });
   });
 
-  it('agrupa todos os canais no mesmo grupo', () => {
-    const body = buildCompositionPosts(input());
+  it('gera ids estáveis por canal e item para que um retry não duplique posts', () => {
+    const first = buildCompositionPosts(
+      input({
+        targets: [
+          { integrationId: 'x-1', providerIdentifier: 'x', content: 'a', comments: ['b'] },
+          { integrationId: 'ig-1', providerIdentifier: 'instagram', content: 'c' },
+        ],
+      })
+    );
+    const ids = first.posts.map((p) => p.value.map((v) => v.id));
 
-    expect(body.posts.map((p) => p.group)).toEqual(['grupo-1', 'grupo-1']);
+    expect(ids).toEqual([
+      ['cmp1-0-0', 'cmp1-0-1'],
+      ['cmp1-1-0'],
+    ]);
   });
 
   it('anexa as mídias renderizadas ao post principal de cada canal', () => {
