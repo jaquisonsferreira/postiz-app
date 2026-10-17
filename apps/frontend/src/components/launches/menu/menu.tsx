@@ -1,5 +1,6 @@
 'use client';
 
+import { useChannelActions } from '@gitroom/frontend/components/launches/helpers/use.channel.actions';
 import React, {
   FC,
   MouseEventHandler,
@@ -11,7 +12,6 @@ import React, {
 } from 'react';
 import { useClickOutside } from '@mantine/hooks';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { TimeTable } from '@gitroom/frontend/components/launches/time.table';
@@ -25,7 +25,6 @@ import { Integration } from '@prisma/client';
 import { SettingsModal } from '@gitroom/frontend/components/launches/settings.modal';
 import { CustomVariables } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useRouter } from 'next/navigation';
-import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
 import dayjs from 'dayjs';
@@ -96,7 +95,6 @@ export const Menu: FC<{
 
   const fetch = useFetch();
   const router = useRouter();
-  const { extensionId } = useVariables();
   const { integrations, reloadCalendarView } = useCalendar();
   const toast = useToaster();
   const modal = useModals();
@@ -152,83 +150,25 @@ export const Menu: FC<{
     },
     [show]
   );
+  const channelActions = useChannelActions(id);
   const disableChannel = useCallback(async () => {
-    if (
-      !(await deleteDialog(
-        t('are_you_sure_disable_channel', 'Are you sure you want to disable this channel?'),
-        t('disable_channel_title', 'Disable Channel')
-      ))
-    ) {
-      return;
+    if (await channelActions.disable()) {
+      setShow(false);
+      onChange(false);
     }
-    await fetch('/integrations/disable', {
-      method: 'POST',
-      body: JSON.stringify({
-        id,
-      }),
-    });
-    toast.show(t('channel_disabled', 'Channel Disabled'), 'success');
-    setShow(false);
-    onChange(false);
-  }, [t]);
+  }, [channelActions]);
   const deleteChannel = useCallback(async () => {
-    if (
-      !(await deleteDialog(
-        t('are_you_sure_delete_channel', 'Are you sure you want to delete this channel?'),
-        t('delete_channel_title', 'Delete Channel')
-      ))
-    ) {
-      return;
+    if (await channelActions.remove()) {
+      setShow(false);
+      onChange(true);
     }
-    const deleteIntegration = await fetch('/integrations', {
-      method: 'DELETE',
-      body: JSON.stringify({
-        id,
-      }),
-    });
-    if (deleteIntegration.status === 406) {
-      toast.show(
-        t('delete_posts_before_channel', 'You have to delete all the posts associated with this channel before deleting it'),
-        'warning'
-      );
-      return;
-    }
-    // Clean up extension refresh token if applicable
-    if (
-      extensionId &&
-      typeof chrome !== 'undefined' &&
-      chrome?.runtime?.sendMessage
-    ) {
-      try {
-        chrome.runtime.sendMessage(
-          extensionId,
-          { type: 'REMOVE_REFRESH_TOKEN', integrationId: id },
-          () => {
-            if (chrome.runtime.lastError) {
-              return;
-            }
-          }
-        );
-      } catch {
-        // Silently ignore
-      }
-    }
-    toast.show(t('channel_deleted', 'Channel Deleted'), 'success');
-    setShow(false);
-    onChange(true);
-  }, [t, extensionId, id]);
-
+  }, [channelActions]);
   const enableChannel = useCallback(async () => {
-    await fetch('/integrations/enable', {
-      method: 'POST',
-      body: JSON.stringify({
-        id,
-      }),
-    });
-    toast.show(t('channel_enabled', 'Channel Enabled'), 'success');
-    setShow(false);
-    onChange(false);
-  }, [t]);
+    if (await channelActions.enable()) {
+      setShow(false);
+      onChange(false);
+    }
+  }, [channelActions]);
 
   const editTimeTable = useCallback(() => {
     const findIntegration = integrations.find(

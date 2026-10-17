@@ -9,7 +9,10 @@ import {
   CheckoutProvider,
   useCheckout,
 } from '@stripe/react-stripe-js/checkout';
-import { modeEmitter } from '@gitroom/frontend/components/layout/mode.component';
+import {
+  DEFAULT_MODE,
+  modeEmitter,
+} from '@gitroom/frontend/components/layout/mode.component';
 import useCookie from 'react-use-cookie';
 import { Button } from '@gitroom/react/form/button';
 import dayjs from 'dayjs';
@@ -24,7 +27,7 @@ export const EmbeddedBilling: FC<{
 }> = ({ stripe, secret, showCoupon = false, autoApplyCoupon }) => {
   const [saveSecret, setSaveSecret] = useState(secret);
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useCookie('mode', 'dark');
+  const [mode, setMode] = useCookie('mode', DEFAULT_MODE);
 
   useEffect(() => {
     modeEmitter.on('mode', (value) => {

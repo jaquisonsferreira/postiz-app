@@ -4,7 +4,12 @@ export const baseConfig: Config = {
   rootDir: __dirname,
   testEnvironment: 'node',
   setupFiles: ['reflect-metadata'],
-  roots: ['<rootDir>/libraries', '<rootDir>/apps/backend', '<rootDir>/apps/orchestrator'],
+  roots: [
+    '<rootDir>/libraries',
+    '<rootDir>/apps/backend',
+    '<rootDir>/apps/orchestrator',
+    '<rootDir>/apps/frontend/e2e',
+  ],
   transform: {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.spec.json' }],
   },

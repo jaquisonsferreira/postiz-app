@@ -5,6 +5,7 @@ import DrawChart from 'chart.js/auto';
 import { TotalList } from '@gitroom/frontend/components/analytics/stars.and.forks.interface';
 import { chunk } from 'lodash';
 import useCookie from 'react-use-cookie';
+import { DEFAULT_MODE } from '@gitroom/frontend/components/layout/mode.component';
 
 function mergeDataPoints(data: TotalList[], numPoints: number): TotalList[] {
   const res = chunk(data, Math.ceil(data.length / numPoints));
@@ -21,7 +22,7 @@ export const ChartSocial: FC<{
   color?: 'purple' | 'green' | 'blue';
 }> = (props) => {
   const { data, color = 'purple' } = props;
-  const [mode] = useCookie('mode', 'dark');
+  const [mode] = useCookie('mode', DEFAULT_MODE);
 
   const list = useMemo(() => {
     const merged = data.length < 7 ? data : mergeDataPoints(data, 7);

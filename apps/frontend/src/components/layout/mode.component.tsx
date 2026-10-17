@@ -5,9 +5,10 @@ import useCookie from 'react-use-cookie';
 import EventEmitter from 'events';
 
 export const modeEmitter = new EventEmitter();
+export const DEFAULT_MODE = 'light';
 
 const ModeComponent = () => {
-  const [mode, setMode] = useCookie('mode', 'dark');
+  const [mode, setMode] = useCookie('mode', DEFAULT_MODE);
 
   const changeMode = useCallback(() => {
     modeEmitter.emit('mode', mode === 'dark' ? 'light' : 'dark');

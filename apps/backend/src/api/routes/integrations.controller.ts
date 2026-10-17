@@ -199,6 +199,11 @@ export class IntegrationsController {
     return this._integrationService.updateNameAndUrl(id, name, url);
   }
 
+  @Get('/:id/settings-schema')
+  getSettingsSchema(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
+    return this._integrationService.getSettingsSchema(org.id, id);
+  }
+
   @Get('/:id')
   getSingleIntegration(
     @Param('id') id: string,

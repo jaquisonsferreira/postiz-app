@@ -25,6 +25,12 @@ export interface SlideSize {
   height: number;
 }
 
+export const SLIDE_SIZES = {
+  portrait: { width: 1080, height: 1350 },
+  square: { width: 1080, height: 1080 },
+  story: { width: 1080, height: 1920 },
+} as const satisfies Record<string, SlideSize>;
+
 export interface SlideTemplateInput {
   slide: SlideContent;
   index: number;

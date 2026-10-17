@@ -21,6 +21,7 @@ import { checkPublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/web
 import { ChromiumSlideRenderer } from '@gitroom/nestjs-libraries/compositions/chromium.slide.renderer';
 import {
   buildSlideHtml,
+  SLIDE_SIZES,
   CompositionBrand,
   DEFAULT_BRAND,
   SlideSize,
@@ -49,17 +50,17 @@ export interface CompositionPost {
   target: number;
 }
 
-const SIZES: Record<NonNullable<CreateCompositionDto['size']>, SlideSize> = {
-  portrait: { width: 1080, height: 1350 },
-  square: { width: 1080, height: 1080 },
-  story: { width: 1080, height: 1920 },
-};
+const SIZES: Record<NonNullable<CreateCompositionDto['size']>, SlideSize> = SLIDE_SIZES;
 
 const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024;
 const REMOTE_IMAGE_TIMEOUT_MS = 30000;
 const MAX_REMOTE_REDIRECTS = 3;
 const MAX_PAGE = 10000;
 
+const safePage = (page: number): number => {
+  const requested = Number(page);
+  return Number.isFinite(requested) ? Math.min(MAX_PAGE, Math.max(0, Math.floor(requested))) : 0;
+};
 // The posts queue lock is renewed before each channel, so it only has to
 // outlive the slowest channel. The credits lock covers one AI generation, and
 // a render waits for it instead of failing an attempt
@@ -356,12 +357,51 @@ export class CompositionService {
     return this.present(composition);
   }
 
+  // The app shows what was sent along with the status: the slides' text and
+  // each channel's caption, never the provider settings or the AI prompts
+  private presentWithContent(
+    composition: NonNullable<
+      Awaited<ReturnType<CompositionRepository['getCompositionWithContent']>>
+    >
+  ) {
+    const { payload, ...rest } = composition;
+    const body = JSON.parse(payload) as CreateCompositionDto;
+    const slides = (body.slides || []).map(({ kicker, headline, body: text, theme }) => ({
+      kicker,
+      headline,
+      body: text,
+      theme,
+    }));
+    const targets = body.targets.map(({ integrationId, content }) => ({ integrationId, content }));
+    return {
+      ...this.present(rest),
+      title: slides[0]?.headline || slides[0]?.kicker || targets[0]?.content || '',
+      size: body.size || 'portrait',
+      slides,
+      targets,
+    };
+  }
+
+  async getCompositionWithContent(org: string, id: string) {
+    const composition = await this._compositionRepository.getCompositionWithContent(org, id);
+    if (!composition) {
+      throw new HttpException('Composition not found', 404);
+    }
+    return this.presentWithContent(composition);
+  }
+
+  async getCompositionsWithContent(org: string, page: number, status?: string) {
+    return (
+      await this._compositionRepository.getCompositionsWithContent(org, safePage(page), status)
+    ).map((c) => this.presentWithContent(c));
+  }
+
+  async countCompositions(org: string, status?: string) {
+    return { total: await this._compositionRepository.countCompositions(org, status) };
+  }
+
   async getCompositions(org: string, page: number) {
-    const requested = Number(page);
-    const safePage = Number.isFinite(requested)
-      ? Math.min(MAX_PAGE, Math.max(0, Math.floor(requested)))
-      : 0;
-    return (await this._compositionRepository.getCompositions(org, safePage)).map((c) =>
+    return (await this._compositionRepository.getCompositions(org, safePage(page))).map((c) =>
       this.present(c)
     );
   }

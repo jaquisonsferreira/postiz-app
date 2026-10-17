@@ -164,7 +164,7 @@ const DayNowLine: FC<{ now: dayjs.Dayjs; className?: string }> = ({
 );
 
 // Shared hook for post actions (edit, delete, statistics)
-const usePostActions = (onMutate?: () => void) => {
+export const usePostActions = (onMutate?: () => void) => {
   const t = useT();
   const fetch = useFetch();
   const modal = useModals();
@@ -1255,11 +1255,12 @@ const CalendarItem: FC<{
     <div
       // @ts-ignore
       ref={dragRef}
+      data-testid="calendar-post"
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
         'relative',
-        state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500',
-        state === 'PUBLISHED' && 'rounded-[10px] ring-2 ring-green-500'
+        state === 'ERROR' && 'rounded-[14px] ring-2 ring-statusErrorText',
+        state === 'PUBLISHED' && 'rounded-[14px] ring-2 ring-statusPublishedText'
       )}
       style={{
         opacity,
@@ -1298,7 +1299,8 @@ const CalendarItem: FC<{
       )}
       <div
         className={clsx(
-          'text-white text-[11px] max-h-[24px] h-[24px] min-h-[24px] w-full rounded-tr-[10px] rounded-tl-[10px] flex items-center justify-center gap-[6px] px-[5px] bg-btnPrimary',
+          'text-inkText text-[11px] max-h-[26px] h-[26px] min-h-[26px] w-full rounded-tr-[14px] rounded-tl-[14px] items-center justify-center gap-[8px] px-[8px] bg-ink',
+          post.tags.length ? 'flex' : 'hidden group-hover:flex',
           display === 'month' && 'mobile:hidden'
         )}
         style={{
@@ -1314,7 +1316,9 @@ const CalendarItem: FC<{
           {post.tags.map((p) => p.tag.name).join(', ')}
         </div>
         {copyDebugJson && (
-          <div
+          <button
+            type="button"
+            aria-label={t('copy_debug', 'Copy debug')}
             className={clsx(
               'hidden group-hover:block hover:underline cursor-pointer',
               post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
@@ -1322,12 +1326,14 @@ const CalendarItem: FC<{
             onClick={copyDebugJson}
           >
             <CopyDebug />
-          </div>
+          </button>
         )}
         {(state === 'PUBLISHED' || state === 'ERROR') &&
           !post.intervalInDays &&
           post.releaseURL?.startsWith('http') && (
-            <div
+            <button
+              type="button"
+              aria-label={t('open_post', 'Open post')}
               className={clsx(
                 'hidden group-hover:block hover:underline cursor-pointer',
                 post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
@@ -1335,12 +1341,14 @@ const CalendarItem: FC<{
               onClick={openPost}
             >
               <OpenPost />
-            </div>
+            </button>
           )}{' '}
         {((post.integration.providerIdentifier === 'x' && disableXAnalytics) || !post.releaseId) ? (
           <></>
         ) : post.releaseId === 'missing' && missingRelease ? (
-          <div
+          <button
+            type="button"
+            aria-label={t('statistics', 'Statistics')}
             className={clsx(
               'hidden group-hover:block hover:underline cursor-pointer',
               post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
@@ -1348,9 +1356,11 @@ const CalendarItem: FC<{
             onClick={missingRelease}
           >
             <Statistics />
-          </div>
+          </button>
         ) : post.releaseId !== 'missing' ? (
-          <div
+          <button
+            type="button"
+            aria-label={t('statistics', 'Statistics')}
             className={clsx(
               'hidden group-hover:block hover:underline cursor-pointer',
               post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
@@ -1358,11 +1368,13 @@ const CalendarItem: FC<{
             onClick={statistics}
           >
             <Statistics />
-          </div>
+          </button>
         ) : (
           <></>
         )}{' '}
-        <div
+        <button
+          type="button"
+          aria-label={t('preview', 'Preview')}
           className={clsx(
             'hidden group-hover:block hover:underline cursor-pointer',
             post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
@@ -1370,8 +1382,10 @@ const CalendarItem: FC<{
           onClick={preview}
         >
           <Preview />
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
+          aria-label={t('duplicate', 'Duplicate')}
           className={clsx(
             'hidden group-hover:block hover:underline cursor-pointer',
             post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
@@ -1379,8 +1393,10 @@ const CalendarItem: FC<{
           onClick={duplicatePost}
         >
           <Duplicate />
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
+          aria-label={t('delete_post', 'Delete Post')}
           className={clsx(
             'hidden group-hover:block hover:underline cursor-pointer text-red-500',
             post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
@@ -1388,12 +1404,20 @@ const CalendarItem: FC<{
           onClick={deletePost}
         >
           <DeletePost />
-        </div>
+        </button>
       </div>
       <div
         onClick={editPost}
         className={clsx(
-          'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor',
+          'gap-[8px] w-full flex h-full flex-1 p-[10px] text-[14px]',
+          post.tags.length ? 'rounded-b-[14px]' : 'rounded-[14px] group-hover:rounded-t-none',
+          state === 'PUBLISHED'
+            ? 'bg-statusPublishedBg'
+            : state === 'ERROR'
+            ? 'bg-statusErrorBg'
+            : state === 'DRAFT'
+            ? 'bg-statusDraftBg'
+            : 'bg-statusScheduledBg',
           'relative',
           display === 'month' &&
             'mobile:p-[4px] mobile:rounded-[10px] mobile:justify-center',

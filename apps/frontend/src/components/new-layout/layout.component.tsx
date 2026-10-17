@@ -2,7 +2,7 @@
 
 import React, { ReactNode, useCallback, useEffect, useState } from 'react';
 import { Logo } from '@gitroom/frontend/components/new-layout/logo';
-import { jakartaSans } from '@gitroom/frontend/fonts/plus-jakarta-sans/plus.jakarta.sans.font';
+import { UserCard } from '@gitroom/frontend/components/new-layout/user.card';
 const ModeComponent = dynamic(
   () => import('@gitroom/frontend/components/layout/mode.component'),
   {
@@ -34,10 +34,8 @@ import { AnnouncementBanner } from '@gitroom/frontend/components/layout/announce
 import { Title } from '@gitroom/frontend/components/layout/title';
 import { TopMenu } from '@gitroom/frontend/components/layout/top.menu';
 import { LanguageComponent } from '@gitroom/frontend/components/layout/language.component';
-import { ChromeExtensionComponent } from '@gitroom/frontend/components/layout/chrome.extension.component';
 import NotificationComponent from '@gitroom/frontend/components/notifications/notification.component';
 import { OrganizationSelector } from '@gitroom/frontend/components/layout/organization.selector';
-import { StreakComponent } from '@gitroom/frontend/components/layout/streak.component';
 import { PreConditionComponent } from '@gitroom/frontend/components/layout/pre-condition.component';
 import { AttachToFeedbackIcon } from '@gitroom/frontend/components/new-layout/sentry.feedback.component';
 import { FirstBillingComponent } from '@gitroom/frontend/components/billing/first.billing.component';
@@ -97,8 +95,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
             <ContinueProvider />
             <div
               className={clsx(
-                'flex flex-col min-h-screen min-w-screen text-newTextColor p-[12px] mobile:p-[8px] mobile:pb-[80px]',
-                jakartaSans.className
+                'flex flex-col min-h-screen min-w-screen text-newTextColor bg-newBgColor'
               )}
             >
               <div>{user?.admin ? <Impersonate /> : <div />}</div>
@@ -107,7 +104,7 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
               ) : (
                 <>
                   <AnnouncementBanner />
-                  <div className="flex-1 flex gap-[8px] mobile:gap-0">
+                  <div className="flex-1 flex min-h-screen">
                     <Support />
                     {menuOpen && (
                       <div
@@ -115,39 +112,30 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                         onClick={() => setMenuOpen(false)}
                       />
                     )}
-                    <div
+                    <aside
+                      id="left-menu"
+                      data-testid="sidebar"
                       className={clsx(
-                        'flex flex-col bg-newBgColorInner w-[80px] rounded-[12px] mobile:fixed mobile:top-0 mobile:bottom-0 mobile:start-0 mobile:z-[491] mobile:rounded-none mobile:overflow-y-auto mobile:overflow-x-hidden',
+                        'w-[88px] mobile:w-[240px] shrink-0 bg-railBg flex flex-col items-center mobile:items-stretch gap-[28px] px-[18px] py-[22px] sticky top-0 h-screen overflow-y-auto mobile:fixed mobile:start-0 mobile:z-[491]',
                         !menuOpen && 'mobile:hidden'
                       )}
                       onClick={() => setMenuOpen(false)}
                     >
-                      <div
-                        id="left-menu"
-                        className={clsx(
-                          'fixed h-full w-[64px] start-[20px] flex flex-1 top-0 mobile:static mobile:h-auto mobile:min-h-full mobile:mx-auto',
-                          user?.admin && 'pt-[52px] max-h-[1000px]:w-[500px]'
-                        )}
-                      >
-                        <div className="flex flex-col h-full gap-[32px] mobile:gap-[16px] flex-1 pt-[12px] pb-[20px] mobile:pb-[12px]">
-                          <div className="flex justify-center">
-                            <Logo />
-                          </div>
-                          <TopMenu />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0 bg-newBgLineColor rounded-[12px] overflow-hidden flex flex-col gap-[1px] blurMe">
-                      <div className="flex bg-newBgColorInner h-[80px] mobile:h-[64px] px-[20px] mobile:px-[12px] gap-[12px] items-center">
+                      <Logo />
+                      <TopMenu />
+                    </aside>
+                    <main className="flex-1 min-w-0 flex flex-col blurMe">
+                      <header className="flex h-[96px] mobile:h-[72px] px-[32px] mobile:px-[16px] gap-[12px] items-center">
                         <button
-                          className="hidden mobile:flex items-center justify-center w-[36px] h-[36px] -ms-[6px] rounded-[8px] text-textItemBlur hover:text-newTextColor hover:bg-boxFocused"
+                          type="button"
+                          className="hidden mobile:flex items-center justify-center w-[44px] h-[44px] -ms-[6px] rounded-full bg-newBgColorInner text-newTextColor"
                           onClick={() => setMenuOpen(true)}
                           aria-label="Open menu"
                         >
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
-                            width="22"
-                            height="22"
+                            width="20"
+                            height="20"
                             viewBox="0 0 24 24"
                             fill="none"
                           >
@@ -159,32 +147,28 @@ export const LayoutComponent = ({ children }: { children: ReactNode }) => {
                             />
                           </svg>
                         </button>
-                        <div className="text-[24px] mobile:text-[20px] font-[600] flex flex-1 min-w-0">
+                        <div className="text-[28px] mobile:text-[22px] font-[500] tracking-[-0.02em] flex flex-1 min-w-0">
                           <Title />
                         </div>
-                        <div className="flex gap-[20px] mobile:gap-[14px] mobile:items-center text-textItemBlur">
-                          <StreakComponent />
-                          <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
-                          <OrganizationSelector />
-                          <div className="hover:text-newTextColor">
-                            <ModeComponent />
-                          </div>
-                          <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
-                          <LanguageComponent />
-                          <div className="contents mobile:hidden">
-                            <ChromeExtensionComponent />
-                          </div>
-                          <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />
-                          <div className="contents mobile:hidden">
+                        <div className="flex gap-[12px] items-center text-textItemBlur">
+                          <div className="flex items-center gap-[16px] mobile:gap-[10px] h-[52px] px-[18px] mobile:px-[12px] rounded-full bg-newBgColorInner">
+                            <OrganizationSelector />
+                            <div className="hover:text-newTextColor">
+                              <ModeComponent />
+                            </div>
+                            <LanguageComponent />
                             <AttachToFeedbackIcon />
                           </div>
-                          <NotificationComponent />
+                          <div className="w-[52px] h-[52px] rounded-full bg-newBgColorInner flex items-center justify-center text-newTextColor">
+                            <NotificationComponent />
+                          </div>
+                          <UserCard />
                         </div>
-                      </div>
-                      <div className="flex flex-1 min-w-0 gap-[1px] mobile:flex-col">
+                      </header>
+                      <div className="flex flex-1 min-w-0 px-[32px] pb-[48px] mobile:px-[16px] mobile:flex-col">
                         {children}
                       </div>
-                    </div>
+                    </main>
                   </div>
                 </>
               )}
