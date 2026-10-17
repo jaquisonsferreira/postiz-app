@@ -20,6 +20,7 @@ import { checkPublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/web
 import { ChromiumSlideRenderer } from '@gitroom/nestjs-libraries/compositions/chromium.slide.renderer';
 import {
   buildSlideHtml,
+  SLIDE_SIZES,
   CompositionBrand,
   DEFAULT_BRAND,
   SlideSize,
@@ -48,11 +49,7 @@ export interface CompositionPost {
   target: number;
 }
 
-const SIZES: Record<NonNullable<CreateCompositionDto['size']>, SlideSize> = {
-  portrait: { width: 1080, height: 1350 },
-  square: { width: 1080, height: 1080 },
-  story: { width: 1080, height: 1920 },
-};
+const SIZES: Record<NonNullable<CreateCompositionDto['size']>, SlideSize> = SLIDE_SIZES;
 
 const MAX_REMOTE_IMAGE_BYTES = 15 * 1024 * 1024;
 const REMOTE_IMAGE_TIMEOUT_MS = 30000;
