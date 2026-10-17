@@ -38,7 +38,7 @@ const storedComposition = (payload: Record<string, unknown>, posts: unknown[] = 
   organizationId: 'org',
   organization: { id: 'org' },
   payload: JSON.stringify(payload),
-  media: null,
+  media: null as string | null,
   posts: posts.length ? JSON.stringify(posts) : null,
 });
 
