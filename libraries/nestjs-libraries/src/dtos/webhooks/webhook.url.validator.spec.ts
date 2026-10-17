@@ -13,6 +13,20 @@ describe('isBlockedIp', () => {
     }
   );
 
+  it.each(['fe80::1', 'fe90::1', 'feab:1::2', 'FEBF:ffff::1', 'fc00::1', 'fdff:1::1', 'ff02::1', '0:0:0:0:0:0:0:1', '0::0'])(
+    'bloqueia o IPv6 link-local, local único, multicast, loopback ou não especificado %s',
+    (ip) => {
+      expect(isBlockedIp(ip)).toBe(true);
+    }
+  );
+
+  it.each(['2001:4860:4860::8888', '2606:4700::1111'])(
+    'aceita o IPv6 fora das faixas bloqueadas %s',
+    (ip) => {
+      expect(isBlockedIp(ip)).toBe(false);
+    }
+  );
+
   it('aceita um IPv4 público escrito como IPv6 mapeado', () => {
     expect(isBlockedIp('::ffff:808:808')).toBe(false);
   });
@@ -58,5 +72,6 @@ describe('checkPublicHttpsUrl', () => {
     expect(await checkPublicHttpsUrl('http://cdn.example.com/logo.png')).toBe('blocked');
     expect(await checkPublicHttpsUrl('https://localhost/logo.png')).toBe('blocked');
     expect(await checkPublicHttpsUrl('https://[::ffff:7f00:1]/logo.png')).toBe('blocked');
+    expect(await checkPublicHttpsUrl('https://[fe90::1]/logo.png')).toBe('blocked');
   });
 });
