@@ -20,7 +20,8 @@ describe('Layout do Pauta', () => {
     for (const section of ['Conteúdo', 'Automação', 'Configurações']) {
       await sidebar.getByRole('group', { name: section }).waitFor();
     }
-    expect(await sidebar.getByRole('group', { name: 'Automação' }).getByRole('link').count()).toBe(1);
+    const automation = sidebar.getByRole('group', { name: 'Automação' }).getByRole('link');
+    expect(await automation.allTextContents()).toEqual(['Aprovações', 'Anúncios']);
     await sidebar.getByRole('link', { name: 'Calendário' }).waitFor();
     expect(await sidebar.getByRole('link', { name: 'Calendário' }).getAttribute('aria-current')).toBe('page');
 
