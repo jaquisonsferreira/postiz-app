@@ -279,4 +279,36 @@ describe('Composições pela API pública', () => {
       await prisma.post.count({ where: { organizationId: orgId, integrationId: xId, deletedAt: null } })
     ).toBe(0);
   });
+
+  it('agenda um post por canal com os ids reais e exclui todos', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      targets: [
+        { integrationId: linkedinId, content: 'No LinkedIn' },
+        { integrationId: xId, content: 'No X', settings: { who_can_reply_post: 'everyone' } },
+      ],
+    });
+    expect(created.status).toBe(201);
+    const { id } = created.json as { id: string };
+
+    const scheduled = await waitForStatus(apiKey, id, ['scheduled']);
+    expect(scheduled.posts.map((p) => p.integration)).toEqual([linkedinId, xId]);
+    const rows = await prisma.post.findMany({
+      where: { id: { in: scheduled.posts.map((p) => p.postId) } },
+    });
+    expect(rows.map((r) => [r.integrationId, r.state, r.content]).sort()).toEqual(
+      [
+        [linkedinId, 'QUEUE', '<p>No LinkedIn</p>'],
+        [xId, 'QUEUE', '<p>No X</p>'],
+      ].sort()
+    );
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(
+      await prisma.post.count({
+        where: { id: { in: scheduled.posts.map((p) => p.postId) }, deletedAt: null },
+      })
+    ).toBe(0);
+  });
 });

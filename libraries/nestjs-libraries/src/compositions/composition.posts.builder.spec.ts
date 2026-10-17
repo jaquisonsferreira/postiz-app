@@ -1,7 +1,6 @@
 import {
   buildCompositionPosts,
   captionToHtml,
-  compositionPostIds,
   CompositionPostsInput,
 } from '@gitroom/nestjs-libraries/compositions/composition.posts.builder';
 import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositions/composition.errors';
@@ -72,23 +71,6 @@ describe('buildCompositionPosts', () => {
     });
   });
 
-  it('gera ids estáveis por canal e item para que um retry não duplique posts', () => {
-    const first = buildCompositionPosts(
-      input({
-        targets: [
-          { integrationId: 'x-1', providerIdentifier: 'x', content: 'a', comments: ['b'] },
-          { integrationId: 'ig-1', providerIdentifier: 'instagram', content: 'c' },
-        ],
-      })
-    );
-    const ids = first.posts.map((p) => p.value.map((v) => v.id));
-
-    expect(ids).toEqual([
-      ['cmp1-0-0', 'cmp1-0-1'],
-      ['cmp1-1-0'],
-    ]);
-  });
-
   it('anexa as mídias renderizadas ao post principal de cada canal', () => {
     const body = buildCompositionPosts(input());
 
@@ -153,10 +135,3 @@ describe('buildCompositionPosts', () => {
   });
 });
 
-describe('compositionPostIds', () => {
-  it('calcula os ids dos posts principais de cada canal sem depender do que foi gravado', () => {
-    const body = buildCompositionPosts(input());
-
-    expect(compositionPostIds('cmp1', 2)).toEqual(body.posts.map((p) => p.value[0].id));
-  });
-});
