@@ -4,13 +4,14 @@ import { randomUUID } from 'crypto';
 import { TypedSearchAttributes } from '@temporalio/common';
 import { TemporalService } from 'nestjs-temporal-core';
 import sharp from 'sharp';
-import pLimit from 'p-limit';
+import dayjs from 'dayjs';
 import { CompositionRepository } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.repository';
 import { CreateCompositionDto } from '@gitroom/nestjs-libraries/dtos/compositions/create.composition.dto';
 import { IntegrationService } from '@gitroom/nestjs-libraries/database/prisma/integrations/integration.service';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
+import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
@@ -59,9 +60,8 @@ const REMOTE_IMAGE_TIMEOUT_MS = 30000;
 const MAX_REMOTE_REDIRECTS = 3;
 const MAX_PAGE = 10000;
 
-// Every composition on this worker shares the limit, so a burst of carousels
-// never runs more browsers than the publishing workers can live next to
-const renderSlot = pLimit(Number(process.env.COMPOSITION_RENDER_CONCURRENCY) || 2);
+const POSTS_LIMIT_MESSAGE =
+  'You have reached the maximum number of posts for your subscription. Please upgrade your subscription to add more posts.';
 
 // A generated background is kept for a day, so a retry after a failed render
 // or upload reuses it instead of paying for it again
@@ -100,6 +100,41 @@ export class CompositionService {
       return true;
     }
     return (await this._subscriptionService.checkCredits(org)).credits >= needed;
+  }
+
+  // The drafts a composition queues count against the plan's posts of the
+  // month the way the posts routes count them, from the day the subscription's
+  // month started. Without a subscription the plan is FREE
+  private async hasPostsLeft(organizationId: string, posts: CompositionPost[]): Promise<boolean> {
+    if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+      return true;
+    }
+    let needed = 0;
+    for (const post of posts) {
+      const [root, ...thread] = await this._postsService.getPostsRecursively(
+        post.postId,
+        false,
+        organizationId,
+        true
+      );
+      if (root && !root.deletedAt && root.state === 'DRAFT') {
+        needed += 1 + thread.length;
+      }
+    }
+    if (!needed) {
+      return true;
+    }
+    const subscription = await this._subscriptionService.getSubscription(organizationId);
+    const limit = pricing[subscription?.subscriptionTier || 'FREE'].posts_per_month;
+    if (!subscription) {
+      return needed <= limit;
+    }
+    const months = Math.abs(dayjs(subscription.createdAt).diff(dayjs(), 'month'));
+    const used = await this._postsService.countPostsFromDay(
+      organizationId,
+      dayjs(subscription.createdAt).add(months, 'month').toDate()
+    );
+    return used + needed <= limit;
   }
 
   private present(
@@ -292,6 +327,9 @@ export class CompositionService {
         throw new HttpException(err.message, 400);
       }
       throw err;
+    }
+    if (!(await this.hasPostsLeft(org, composition.posts))) {
+      throw new HttpException(POSTS_LIMIT_MESSAGE, 402);
     }
     const lease = randomUUID();
     const claimed = await this._compositionRepository.claimApproval(org, id, lease);
@@ -492,12 +530,22 @@ export class CompositionService {
     if (!(await this.hasImageCredits(organization, 1))) {
       throw new CompositionValidationError('Not enough AI image credits for the backgrounds');
     }
-    const b64 = await this._mediaService.generateImage(
-      background.prompt as string,
-      organization,
-      false,
-      size.height > size.width
-    );
+    let b64: string | undefined;
+    try {
+      b64 = await this._mediaService.generateImage(
+        background.prompt as string,
+        organization,
+        false,
+        size.height > size.width
+      );
+    } catch (err: unknown) {
+      // a refused prompt (a safety rejection) is refused again on a retry, a
+      // generator that failed (5xx) may answer the next attempt
+      if (err instanceof HttpException && err.getStatus() < 500 && err.getStatus() !== 429) {
+        throw new CompositionValidationError(err.message);
+      }
+      throw err;
+    }
     if (!b64) {
       throw new CompositionValidationError('The image generator returned no image');
     }
@@ -525,54 +573,52 @@ export class CompositionService {
     const size = SIZES[composition.body.size || 'portrait'];
     const media = [...composition.media];
 
-    await renderSlot(async () => {
-      const renderer = new ChromiumSlideRenderer({
-        executablePath: process.env.CHROMIUM_EXECUTABLE_PATH,
-      });
-      try {
-        for (let index = media.length; index < slides.length; index++) {
-          const slide = slides[index];
-          const html = buildSlideHtml({
-            slide,
-            index,
-            total: slides.length,
-            size,
-            brand,
-            backgroundImage: await this.background(
-              id,
-              index,
-              composition.organization,
-              size,
-              slide.background
-            ),
-          });
-          const png = await renderer.render(html, size);
-          const path = await this._storage.uploadSimple(
-            `data:image/png;base64,${png.toString('base64')}`
-          );
-          const saved = await this._mediaService.saveFile(
-            composition.organizationId,
-            path.split('/').pop() as string,
-            path
-          );
-          const previous = media.length ? JSON.stringify(media) : composition.storedMedia;
-          media.push({ id: saved.id, path: saved.path });
-          const written = await this._compositionRepository.saveMedia(
-            id,
-            previous,
-            JSON.stringify(media)
-          );
-          // another attempt saved this slide first: the retry starts again from
-          // the stored checkpoint, and stops there if the composition is gone
-          if (!written.count) {
-            throw new Error(`Composition ${id} was changed by another render attempt`);
-          }
-          await ioRedis.del(backgroundKey(id, index));
-        }
-      } finally {
-        await renderer.close();
-      }
+    const renderer = new ChromiumSlideRenderer({
+      executablePath: process.env.CHROMIUM_EXECUTABLE_PATH,
     });
+    try {
+      for (let index = media.length; index < slides.length; index++) {
+        const slide = slides[index];
+        const html = buildSlideHtml({
+          slide,
+          index,
+          total: slides.length,
+          size,
+          brand,
+          backgroundImage: await this.background(
+            id,
+            index,
+            composition.organization,
+            size,
+            slide.background
+          ),
+        });
+        const png = await renderer.render(html, size);
+        const path = await this._storage.uploadSimple(
+          `data:image/png;base64,${png.toString('base64')}`
+        );
+        const saved = await this._mediaService.saveFile(
+          composition.organizationId,
+          path.split('/').pop() as string,
+          path
+        );
+        const previous = media.length ? JSON.stringify(media) : composition.storedMedia;
+        media.push({ id: saved.id, path: saved.path });
+        const written = await this._compositionRepository.saveMedia(
+          id,
+          previous,
+          JSON.stringify(media)
+        );
+        // another attempt saved this slide first: the retry starts again from
+        // the stored checkpoint, and stops there if the composition is gone
+        if (!written.count) {
+          throw new Error(`Composition ${id} was changed by another render attempt`);
+        }
+        await ioRedis.del(backgroundKey(id, index));
+      }
+    } finally {
+      await renderer.close();
+    }
 
     return media;
   }
@@ -669,6 +715,9 @@ export class CompositionService {
       return;
     }
     if (!requiresApproval) {
+      if (!(await this.hasPostsLeft(organizationId, posts))) {
+        throw new CompositionValidationError(POSTS_LIMIT_MESSAGE);
+      }
       // the lease is renewed before each post, so a retry never takes over
       // while this attempt is still starting publishing workflows
       await this.queuePosts(organizationId, posts, async () => {

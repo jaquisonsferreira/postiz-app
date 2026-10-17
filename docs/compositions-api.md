@@ -81,7 +81,7 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
 
 ## Aprovar
 
-`POST /public/v1/compositions/:id/approve`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e retorna a composição com `status: "scheduled"`. Uma aprovação por vez: outra enviada enquanto a primeira enfileira os posts responde `400`, e uma que parou no meio pode ser reenviada depois de dois minutos.
+`POST /public/v1/compositions/:id/approve`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e retorna a composição com `status: "scheduled"`. Com a cobrança ativa, responde `402` se os posts passarem do limite mensal do plano. Uma aprovação por vez: outra enviada enquanto a primeira enfileira os posts responde `400`, e uma que parou no meio pode ser reenviada depois de dois minutos.
 
 ## Excluir
 
@@ -93,12 +93,12 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
 | --- | --- |
 | `CHROMIUM_EXECUTABLE_PATH` | Chromium usado pelo orchestrator. Vazio usa o instalado por `pnpm exec playwright-core install chromium` (já incluso na imagem Docker). |
 | `OPENAI_API_KEY` | Necessária apenas para fundos `type: "ai"`. |
-| `COMPOSITION_RENDER_CONCURRENCY` | Quantas composições cada orchestrator renderiza ao mesmo tempo (padrão 2), para o Chromium não disputar memória com a publicação. |
+| `COMPOSITION_RENDER_CONCURRENCY` | Quantas composições cada orchestrator renderiza ao mesmo tempo (padrão 2), para o Chromium não disputar memória com a publicação. As renderizações usam a fila `composition-render` do Temporal: as que esperam vaga ficam na fila, sem consumir o tempo das tentativas, e `EXCLUDE_QUEUE=composition-render` tira a renderização de um servidor. |
 | `STORAGE_PROVIDER` | `local` ou `cloudflare`, como o restante das mídias do Postiz. |
 
 Segurança: o HTML dos slides é renderizado com JavaScript desativado e só pode acessar o Google Fonts. Imagens remotas são baixadas pelo orchestrator com proteção contra SSRF (endereços internos são bloqueados, inclusive escritos como IP), limitadas a 15 MB durante o download, com timeout de 30 s, e reencodadas em PNG.
 
-Retentativas: cada slide e cada post é gravado na composição assim que existe, então uma nova tentativa continua de onde parou sem cobrar a IA de novo nem duplicar posts. Falhas de rede (inclusive DNS temporariamente indisponível), 5xx e 429 são retentadas; erros que não mudam com nova tentativa encerram a composição em `failed`.
+Retentativas: cada slide e cada post é gravado na composição assim que existe, então uma nova tentativa continua de onde parou sem cobrar a IA de novo nem duplicar posts. Falhas de rede (inclusive DNS temporariamente indisponível), 5xx e 429 são retentadas; erros que não mudam com nova tentativa (como um prompt recusado pelo gerador de imagens ou posts acima do limite mensal do plano) encerram a composição em `failed`.
 
 ## Testes
 

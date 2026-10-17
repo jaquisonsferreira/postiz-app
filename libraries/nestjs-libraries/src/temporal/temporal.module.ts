@@ -1,6 +1,7 @@
 import { TemporalModule } from 'nestjs-temporal-core';
 import { socialIntegrationList } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import { emailQueues } from '@gitroom/nestjs-libraries/temporal/email.queues';
+import { compositionQueues } from '@gitroom/nestjs-libraries/temporal/composition.queues';
 
 export const getTemporalModule = (
   isWorkers: boolean,
@@ -91,6 +92,20 @@ export const getTemporalModule = (
                 workerOptions: {
                   maxConcurrentActivityTaskExecutions: 10,
                   maxTaskQueueActivitiesPerSecond: perSecond,
+                },
+              })),
+            // Activity-only Worker for the composition renders. The limit is the
+            // browsers one server can run, so it is not divided between servers
+            ...[compositionQueues.render]
+              .filter(({ taskQueue }) => !excludeQueues.includes(taskQueue))
+              .map(({ taskQueue }) => ({
+                taskQueue,
+                activityClasses: activityClasses!,
+                autoStart: true,
+                workerOptions: {
+                  maxConcurrentActivityTaskExecutions:
+                    Number(process.env.COMPOSITION_RENDER_CONCURRENCY) || 2,
+                  maxHeartbeatThrottleInterval: '15s',
                 },
               })),
           ],
