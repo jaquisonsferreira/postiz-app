@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { fallbackLng, languages } from './i18n.config';
+import { displayLocales, fallbackLng, languages } from './i18n.config';
 
 const ROOT = join(__dirname, '..', '..', '..', '..');
 const SOURCE_DIRS = [join(ROOT, 'apps', 'frontend', 'src'), join(ROOT, 'libraries')];
@@ -39,8 +39,12 @@ const english = loadLocale(fallbackLng);
 const portuguese = loadLocale('pt');
 
 describe('tradução para português do Brasil', () => {
-  it('mantém o português entre os idiomas disponíveis', () => {
-    expect(languages).toContain('pt');
+  it('oferece apenas inglês e português do Brasil', () => {
+    expect(languages).toEqual(['en', 'pt']);
+  });
+
+  it('exibe o português como português do Brasil', () => {
+    expect(displayLocales.pt).toBe('pt-BR');
   });
 
   it('tem no inglês todas as chaves usadas no código', () => {
