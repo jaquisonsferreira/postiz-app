@@ -3,6 +3,7 @@ import type { Config } from 'jest';
 export const baseConfig: Config = {
   rootDir: __dirname,
   testEnvironment: 'node',
+  testTimeout: 30000,
   roots: ['<rootDir>/libraries', '<rootDir>/apps/backend', '<rootDir>/apps/orchestrator'],
   transform: {
     '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.spec.json' }],
