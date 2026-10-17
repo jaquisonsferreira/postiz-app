@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, ReactNode } from 'react';
+import { FC, ReactNode, useState } from 'react';
 import clsx from 'clsx';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { VideoOrImage } from '@gitroom/react/helpers/video.or.image';
@@ -42,13 +42,17 @@ const EmptyMedia: FC<{ className?: string }> = ({ className }) => {
   );
 };
 
-const Slides: FC<{ media: string[]; className: string }> = ({
-  media,
-  className,
-}) =>
+const Slides: FC<{
+  media: string[];
+  className: string;
+  dots?: boolean;
+  onChange?: (index: number) => void;
+}> = ({ media, className, dots, onChange }) =>
   media.length ? (
     <SliderComponent
       className={clsx(className, 'overflow-hidden')}
+      dots={dots}
+      onChange={onChange}
       list={media.map((src, index) => (
         <div
           key={`${src}_${index}`}
@@ -220,21 +224,28 @@ const VerticalVideo: FC<{ content: PreviewContent; slides?: boolean }> = ({
 
 const Story: FC<{ content: PreviewContent }> = ({ content }) => {
   const t = useT();
+  const [current, setCurrent] = useState(0);
   const pages = Math.max(content.media.length, 1);
   return (
     <div
       data-testid="post-preview-story"
       className="relative w-full aspect-[9/16] bg-black text-white rounded-[12px] overflow-hidden"
     >
-      <SingleMedia media={content.media} className="w-full h-full" />
-      <div className="absolute top-0 start-0 end-0 p-[10px] flex flex-col gap-[10px] bg-gradient-to-b from-black/60 to-transparent">
+      <Slides
+        media={content.media}
+        className="w-full h-full"
+        dots={false}
+        onChange={setCurrent}
+      />
+      <div className="absolute top-0 start-0 end-0 p-[10px] flex flex-col gap-[10px] bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
         <div className="flex gap-[4px]">
           {Array.from({ length: pages }).map((_, index) => (
             <span
               key={index}
+              data-active={index <= current}
               className={clsx(
                 'flex-1 h-[2px] rounded-full',
-                index === 0 ? 'bg-white' : 'bg-white/40'
+                index <= current ? 'bg-white' : 'bg-white/40'
               )}
             />
           ))}
@@ -244,7 +255,7 @@ const Story: FC<{ content: PreviewContent }> = ({ content }) => {
           <span className="text-[13px] font-[600]">{content.name}</span>
         </div>
       </div>
-      <div className="absolute bottom-0 start-0 end-0 p-[12px] flex items-center gap-[12px]">
+      <div className="absolute bottom-0 start-0 end-0 p-[12px] flex items-center gap-[12px] pointer-events-none">
         <span className="flex-1 h-[40px] rounded-full border border-white/60 px-[16px] flex items-center text-[13px]">
           {t('preview_send_message', 'Send message')}
         </span>

@@ -20,6 +20,7 @@ import { Card, CardHeader } from '@gitroom/frontend/components/ui/card';
 import { PillButton } from '@gitroom/frontend/components/ui/pill.button';
 import { StatusPill } from '@gitroom/frontend/components/ui/status.pill';
 import { ChannelIcon } from '@gitroom/frontend/components/ui/channel.icon';
+import { PostPreview, usePostPreview } from '@gitroom/frontend/components/posts/post.preview.modal';
 
 interface Channel {
   id: string;
@@ -37,6 +38,7 @@ const Detail: FC<{ composition: Composition; channels: Channel[]; onDone: () => 
   const date = useLocalDate();
   const toaster = useToaster();
   const { approve, reject } = useCompositionActions();
+  const preview = usePostPreview();
   const [busy, setBusy] = useState(false);
 
   const run = useCallback(
@@ -139,6 +141,18 @@ const Detail: FC<{ composition: Composition; channels: Channel[]; onDone: () => 
                   <span className="text-[15px] font-[500]">{channel?.name || target.integrationId}</span>
                   <span className="text-[15px] leading-[1.5] whitespace-pre-line break-words text-newTextColor/90">{target.content}</span>
                 </span>
+                <PillButton
+                  className="!h-[40px] !px-[16px] !text-[14px] shrink-0"
+                  onClick={preview(`${composition.id}-${index}`)}
+                  icon={
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  }
+                >
+                  {t('preview', 'Preview')}
+                </PillButton>
               </li>
             );
           })}
@@ -187,6 +201,7 @@ export const ApprovalsComponent: FC = () => {
 
   return (
     <div className="flex-1 min-w-0 flex gap-[20px] items-start mobile:flex-col">
+      <PostPreview />
       <Card className="w-[360px] mobile:w-full shrink-0 !p-[16px] !gap-[8px]" testId="approval-queue">
         <div className="px-[12px] pt-[8px] pb-[4px]">
           <CardHeader title={t('queue', 'Queue')} meta={String(pendingTotal)} />
