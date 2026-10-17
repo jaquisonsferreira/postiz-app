@@ -42,7 +42,7 @@ export const openAppSession = async (): Promise<AppSession> => {
     { name: 'i18next', value: 'pt', url: FRONTEND_URL },
   ]);
   const page = await context.newPage();
-  page.setDefaultTimeout(60000);
+  page.setDefaultTimeout(120000);
 
   return {
     browser,

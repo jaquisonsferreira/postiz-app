@@ -11,6 +11,7 @@ import {
   Composition,
   useCompositionActions,
   useCompositions,
+  useCompositionSummary,
 } from '@gitroom/frontend/components/approvals/use.compositions';
 import { useLocalDate } from '@gitroom/frontend/components/dashboard/use.dashboard';
 import { Card, CardHeader } from '@gitroom/frontend/components/ui/card';
@@ -76,14 +77,16 @@ const Detail: FC<{ composition: Composition; channels: Channel[]; onDone: () => 
     <div data-testid="approval-detail" className="flex-1 min-w-0 flex flex-col gap-[20px]">
       <div className="flex flex-wrap items-end gap-[16px]">
         <div className="flex-1 min-w-[260px] flex flex-col gap-[8px]">
-          <span className="flex items-center gap-[10px] text-[13px] uppercase tracking-[0.06em] text-textItemBlur">
-            {t('composition', 'Composition')} · {t(`format_${composition.format}`, composition.format)}
+          <span className="flex items-center gap-[10px]">
+            <span className="text-[13px] uppercase tracking-[0.06em] text-textItemBlur">
+              {t('composition', 'Composition')} · {t(`format_${composition.format}`, composition.format)}
+            </span>
             <StatusPill status="awaiting_approval" />
           </span>
           <h2 className="m-0 text-[36px] mobile:text-[28px] leading-[1.15] font-[500] tracking-[-0.02em]">
             {composition.title}
           </h2>
-          <p className="m-0 text-[17px] text-textItemBlur capitalize">
+          <p className="m-0 text-[17px] text-textItemBlur inline-block first-letter:uppercase">
             {t('scheduled_for', 'Scheduled for')} {date(composition.publishDate).format('dddd, D MMMM · HH:mm')}
           </p>
         </div>
@@ -146,6 +149,7 @@ const Detail: FC<{ composition: Composition; channels: Channel[]; onDone: () => 
 export const ApprovalsComponent: FC = () => {
   const t = useT();
   const date = useLocalDate();
+  const summary = useCompositionSummary();
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
@@ -196,12 +200,9 @@ export const ApprovalsComponent: FC = () => {
             )}
           >
             <span className="text-[16px] font-[500] line-clamp-2">{item.title}</span>
-            <span className="text-[13px] text-textItemBlur capitalize">
+            <span className="text-[13px] text-textItemBlur inline-block first-letter:uppercase">
               {date(item.publishDate).format('ddd, D MMM · HH:mm')} ·{' '}
-              {t('composition_summary', '{{slides}} slides · {{channels}} channels', {
-                slides: item.slides.length,
-                channels: item.targets.length,
-              })}
+              {summary(item)}
             </span>
           </button>
         ))}

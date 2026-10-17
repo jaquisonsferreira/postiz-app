@@ -176,7 +176,7 @@ export const DashboardComponent: FC = () => {
               {stats.upcoming.slice(0, 6).map((post) => (
                 <li key={post.id} className="flex items-center gap-[16px] py-[14px] border-t border-newBorder first:border-t-0">
                   <span className="w-[72px] shrink-0 flex flex-col">
-                    <span className="text-[15px] font-[500] capitalize">{date(post.publishDate).format('ddd D')}</span>
+                    <span className="text-[15px] font-[500] inline-block first-letter:uppercase">{date(post.publishDate).format('ddd D')}</span>
                     <span className="text-[13px] text-textItemBlur">{date(post.publishDate).format('HH:mm')}</span>
                   </span>
                   <ChannelIcon identifier={post.integration.providerIdentifier} picture={post.integration.picture} name={post.integration.name} />

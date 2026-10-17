@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import useSWR, { useSWRConfig } from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
 export interface CompositionSlide {
   kicker?: string;
@@ -78,4 +79,20 @@ export const useCompositionActions = () => {
   );
 
   return { approve, reject };
+};
+
+export const useCompositionSummary = () => {
+  const t = useT();
+  return useCallback(
+    (composition: Composition) =>
+      [
+        composition.slides.length
+          ? t('summary_slides', 'Slides: {{total}}', { total: composition.slides.length })
+          : '',
+        t('summary_channels', 'Channels: {{total}}', { total: composition.targets.length }),
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    [t]
+  );
 };

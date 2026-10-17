@@ -8,7 +8,10 @@ import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validatio
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import { CalendarWeekProvider } from '@gitroom/frontend/components/launches/calendar.context';
 import { usePostActions } from '@gitroom/frontend/components/launches/calendar';
-import { useCompositions } from '@gitroom/frontend/components/approvals/use.compositions';
+import {
+  useCompositions,
+  useCompositionSummary,
+} from '@gitroom/frontend/components/approvals/use.compositions';
 import { PostsListState, usePostsList } from '@gitroom/frontend/components/posts/use.posts.list';
 import { CalendarPost, useLocalDate } from '@gitroom/frontend/components/dashboard/use.dashboard';
 import { PillTabs } from '@gitroom/frontend/components/ui/pill.tabs';
@@ -52,7 +55,7 @@ const PostCard: FC<{ post: CalendarPost; onChange: () => void }> = ({ post, onCh
         <ChannelIcon identifier={post.integration.providerIdentifier} picture={post.integration.picture} name={post.integration.name} />
         <span className="flex-1 min-w-0 flex flex-col">
           <span className="text-[15px] font-[500] truncate">{post.integration.name}</span>
-          <span className="text-[13px] text-textItemBlur capitalize">
+          <span className="text-[13px] text-textItemBlur inline-block first-letter:uppercase">
             {date(post.publishDate).format('ddd, D MMM · HH:mm')}
           </span>
         </span>
@@ -95,6 +98,7 @@ const EmptyState: FC<{ text: string }> = ({ text }) => (
 const PostsInner: FC = () => {
   const t = useT();
   const date = useLocalDate();
+  const summary = useCompositionSummary();
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
@@ -157,17 +161,14 @@ const PostsInner: FC = () => {
                 className="bg-newBgColorInner rounded-[28px] p-[22px] flex flex-col gap-[12px] hover:ring-2 hover:ring-newBorder"
               >
                 <span className="flex items-center justify-between gap-[12px]">
-                  <span className="text-[13px] text-textItemBlur capitalize">
+                  <span className="text-[13px] text-textItemBlur inline-block first-letter:uppercase">
                     {date(composition.publishDate).format('ddd, D MMM · HH:mm')}
                   </span>
                   <StatusPill status="awaiting_approval" />
                 </span>
                 <span className="text-[17px] font-[500]">{composition.title}</span>
                 <span className="text-[13px] text-textItemBlur">
-                  {t('composition_summary', '{{slides}} slides · {{channels}} channels', {
-                    slides: composition.slides.length,
-                    channels: composition.targets.length,
-                  })}
+                  {summary(composition)}
                 </span>
               </Link>
             ))}

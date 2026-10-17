@@ -927,7 +927,6 @@
   "drafts": "Rascunhos",
   "post_status": "Status do post",
   "no_pending_approvals": "Nenhuma composição aguardando aprovação.",
-  "composition_summary": "{{slides}} slides · {{channels}} canais",
   "no_posts_in_status": "Nenhum post aqui ainda. Crie um post ou aprove uma composição.",
   "composition_approved": "Composição aprovada e agendada",
   "reject_composition_question": "Rejeitar esta composição? Os rascunhos serão excluídos.",
@@ -943,5 +942,7 @@
   "slide_position": "Slide {{index}} de {{total}}",
   "captions": "Legendas",
   "queue_empty": "Fila zerada",
-  "queue": "Fila"
+  "queue": "Fila",
+  "summary_slides": "Slides: {{total}}",
+  "summary_channels": "Canais: {{total}}"
 }

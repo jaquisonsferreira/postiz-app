@@ -929,7 +929,6 @@
   "drafts": "Drafts",
   "post_status": "Post status",
   "no_pending_approvals": "No composition is waiting for approval.",
-  "composition_summary": "{{slides}} slides · {{channels}} channels",
   "no_posts_in_status": "No posts here yet. Create a post or approve a composition.",
   "composition_approved": "Composition approved and scheduled",
   "reject_composition_question": "Reject this composition? Its drafts will be deleted.",
@@ -945,5 +944,7 @@
   "slide_position": "Slide {{index}} of {{total}}",
   "captions": "Captions",
   "queue_empty": "Queue is clear",
-  "queue": "Queue"
+  "queue": "Queue",
+  "summary_slides": "Slides: {{total}}",
+  "summary_channels": "Channels: {{total}}"
 }
