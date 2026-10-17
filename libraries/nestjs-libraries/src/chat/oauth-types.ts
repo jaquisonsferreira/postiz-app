@@ -79,6 +79,12 @@ export function generateWWWAuthenticateHeader(options: OAuthResponseOptions = {}
   return `Bearer ${params.join(', ')}`;
 }
 
+// The backend can be served under a path (e.g. https://host/api behind nginx),
+// which new URL('/path', backendUrl) would drop
+export function publicBackendUrl(path: string, backendUrl: string): string {
+  return `${backendUrl.replace(/\/+$/, '')}${path}`;
+}
+
 export function generateProtectedResourceMetadata(config: MCPServerOAuthConfig): OAuthProtectedResourceMetadata {
   return {
     resource: config.resource,

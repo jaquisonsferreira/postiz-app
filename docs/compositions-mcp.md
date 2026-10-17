@@ -1,20 +1,42 @@
-# API de composições
+# Composições pelo MCP
 
 Recebe o conteúdo pronto de um post, gera as artes (slides de carrossel ou imagem única), salva na biblioteca de mídia e agenda a publicação nos canais conectados, com aprovação opcional.
 
-Todas as rotas usam a chave de API da organização no header `Authorization` (a mesma chave da API pública do Postiz, exibida nas configurações da organização).
+As composições são criadas pelo servidor MCP do Pauta. A antiga rota `/public/v1/compositions` foi removida; o app continua usando a rota interna `/compositions`.
+
+## Conexão
+
+| Forma | Endereço |
+| --- | --- |
+| Chave de API no header | `https://pauta.oriflow.io/api/mcp` com `Authorization: Bearer <chave da API>` |
+| Chave de API na URL | `https://pauta.oriflow.io/api/mcp/<chave da API>` |
+| OAuth (conector do Claude.ai, ChatGPT e outros clientes com registro dinâmico) | `https://pauta.oriflow.io/api/mcp-oauth-dynamic` |
+
+A chave é a mesma da API pública, exibida nas configurações da organização.
+
+## Ferramentas
+
+| Ferramenta | Uso |
+| --- | --- |
+| `compositionCreateTool` | Valida o payload e as configurações de cada canal e inicia a composição. Devolve `{ id, status: "pending" }`. |
+| `compositionGetTool` | Status, erro, mídias geradas, posts criados (com `previewUrl`) e o conteúdo enviado de uma composição. |
+| `compositionsListTool` | Composições da organização, 20 por página (`page` a partir de 0), com filtro opcional por `status`. |
+| `compositionApproveTool` | Passa os rascunhos de uma composição em `awaiting_approval` para a fila de publicação. |
+| `compositionDeleteTool` | Interrompe a geração, remove os posts (cancelando a publicação agendada) e a composição. |
+
+Recusas (payload inválido, canal indisponível, composição inexistente, limite do plano) voltam em `output.errors`, com a mesma mensagem que a rota do app devolveria. A chamada pode ser refeita depois de corrigida.
 
 ## Fluxo
 
-1. `POST /public/v1/compositions` valida o payload e as configurações de cada canal e responde `201` com `{ id, status: "pending" }`.
+1. `compositionCreateTool` valida o payload e as configurações de cada canal e devolve `{ id, status: "pending" }`.
 2. O workflow `compositionWorkflow` (Temporal) renderiza os slides, salva as imagens e cria os posts.
-3. O status evolui `pending → rendering → scheduling → awaiting_approval | scheduled`, ou `failed` com a mensagem em `error`.
-4. Com `requiresApproval: true` os posts ficam como rascunho até `POST /:id/approve`. Edições feitas no painel do Postiz enquanto o post é rascunho são preservadas na aprovação.
+3. O status evolui `pending → rendering → scheduling → awaiting_approval | scheduled`, ou `failed` com a mensagem em `error`. Acompanhe com `compositionGetTool`.
+4. Com `requiresApproval: true` os posts ficam como rascunho até `compositionApproveTool`. Edições feitas no painel do Postiz enquanto o post é rascunho são preservadas na aprovação.
 5. Na data informada o Postiz publica pelos providers de cada rede.
 
 ## Criar
 
-`POST /public/v1/compositions`
+Argumentos de `compositionCreateTool`:
 
 ```json
 {
@@ -54,15 +76,15 @@ Todas as rotas usam a chave de API da organização no header `Authorization` (a
 | `brand` | Opcional. Cores `#RRGGBB`, fontes do Google Fonts, `logoUrl` HTTPS. Sem marca usa o modelo Editorial roxo. |
 | `slides[].theme` | `accent`, `light` ou `dark`. Padrão: capa `accent`, último slide (de 3 ou mais) `dark`, demais `light`. |
 | `slides[].background` | `{ "type": "ai", "prompt" }` gera a imagem com IA (consome créditos `ai_images`, exige `OPENAI_API_KEY`); `{ "type": "url", "url" }` usa uma imagem HTTPS pública. A imagem é gerada vertical, ou quadrada em `size: "square"`. O texto é sobreposto com degradê para legibilidade. |
-| `targets[]` | 1 a 20 canais. `content` é a legenda (quebras de linha preservadas), `comments` vira o fio/comentários seguintes (só em canais que publicam comentários), `settings` são as configurações do provider (as mesmas de `GET /public/v1/integration-settings/:id`, até 20 000 caracteres em JSON e 10 níveis). |
+| `targets[]` | 1 a 20 canais. `content` é a legenda (quebras de linha preservadas), `comments` vira o fio/comentários seguintes (só em canais que publicam comentários), `settings` são as configurações do provider (as mesmas da ferramenta `integrationSchema`, até 20 000 caracteres em JSON e 10 níveis). |
 
-Respostas de erro imediatas: `402` quando faltam créditos de IA para os fundos `type: "ai"` (só com cobrança ativa), `429` acima do limite de requisições da API pública, e `400` para payload inválido, canal inexistente, desativado ou de outra organização, `comments` em canal que não publica comentários, e configurações obrigatórias do provider ausentes (a mensagem cita o campo, por exemplo `who_can_reply_post`).
+Recusas imediatas em `output.errors`: créditos de IA insuficientes para os fundos `type: "ai"` (só com cobrança ativa), payload inválido, canal inexistente, desativado ou de outra organização, `comments` em canal que não publica comentários, e configurações obrigatórias do provider ausentes (a mensagem cita o campo, por exemplo `who_can_reply_post`). Cada chamada ao MCP aceita até 4 MB.
 
 Erros que só aparecem durante a geração (imagem remota inacessível, mídia incompatível com a rede, limite de caracteres) deixam a composição em `failed` com o motivo em `error`.
 
 ## Consultar
 
-`GET /public/v1/compositions/:id` e `GET /public/v1/compositions?page=0` (20 por página).
+`compositionGetTool` com `{ "id": "…" }` e `compositionsListTool` com `{ "page": 0, "status": "awaiting_approval" }` (os dois campos são opcionais).
 
 ```json
 {
@@ -73,7 +95,11 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
   "requiresApproval": true,
   "error": null,
   "media": [{ "id": "…", "path": "https://…/uploads/2026/10/17/….png" }],
-  "posts": [{ "postId": "…", "integration": "<id do canal>", "target": 0 }],
+  "posts": [{ "postId": "…", "integration": "<id do canal>", "target": 0, "previewUrl": "https://pauta.oriflow.io/p/…?share=true" }],
+  "title": "5 pontos que sua empresa precisa acompanhar",
+  "size": "portrait",
+  "slides": [{ "kicker": "Reforma Tributária", "headline": "5 pontos que sua empresa precisa acompanhar" }],
+  "targets": [{ "integrationId": "<id do canal>", "content": "Legenda do Instagram" }],
   "createdAt": "…",
   "updatedAt": "…"
 }
@@ -81,11 +107,11 @@ Erros que só aparecem durante a geração (imagem remota inacessível, mídia i
 
 ## Aprovar
 
-`POST /public/v1/compositions/:id/approve`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e retorna a composição com `status: "scheduled"`. Com a cobrança ativa, responde `402` se os posts passarem do limite mensal do plano. Cada rascunho é conferido de novo logo antes de entrar na fila: um editado no painel que não passa nas checagens do canal interrompe a aprovação com `400`, e ela pode ser reenviada depois de corrigido. Uma aprovação por vez: outra enviada enquanto a primeira enfileira os posts responde `400`, e uma que parou no meio pode ser reenviada depois de dois minutos.
+`compositionApproveTool` com `{ "id": "…" }`. Só para composições em `awaiting_approval`; passa os posts para a fila de publicação e devolve a composição com `status: "scheduled"`. Com a cobrança ativa, recusa se os posts passarem do limite mensal do plano. Cada rascunho é conferido de novo logo antes de entrar na fila: um editado no painel que não passa nas checagens do canal interrompe a aprovação, e ela pode ser reenviada depois de corrigido. Uma aprovação por vez: outra enviada enquanto a primeira enfileira os posts é recusada, e uma que parou no meio pode ser reenviada depois de dois minutos.
 
 ## Excluir
 
-`DELETE /public/v1/compositions/:id`. Interrompe a geração se ainda estiver em andamento, remove os posts (cancelando a publicação agendada) e a composição. Pode ser reenviado: uma exclusão interrompida termina de remover os posts.
+`compositionDeleteTool` com `{ "id": "…" }`. Interrompe a geração se ainda estiver em andamento, remove os posts (cancelando a publicação agendada) e a composição. Pode ser reenviado: uma exclusão interrompida termina de remover os posts.
 
 ## Configuração
 

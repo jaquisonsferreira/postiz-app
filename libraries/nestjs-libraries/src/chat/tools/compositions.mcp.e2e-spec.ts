@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   PrismaRepository,
   PrismaService,
@@ -23,37 +25,53 @@ interface CompositionResponse {
   requiresApproval: boolean;
   error: string | null;
   media: { id: string; path: string }[];
-  posts: { postId: string; integration: string }[];
+  posts: { postId: string; integration: string; previewUrl: string }[];
 }
 
-const api = async (
-  method: string,
-  path: string,
-  apiKey: string | null,
-  body?: unknown
-): Promise<{ status: number; json: unknown }> => {
-  const response = await fetch(`${API_URL}/public/v1${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey ? { Authorization: apiKey } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await response.text();
-  return { status: response.status, json: text ? JSON.parse(text) : null };
+type ToolOutput = { errors?: string } & Record<string, unknown>;
+
+const connect = async (apiKey: string): Promise<Client> => {
+  const client = new Client({ name: 'e2e', version: '1.0.0' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(`${API_URL}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
+    })
+  );
+  return client;
 };
 
+const call = async (
+  client: Client,
+  name: string,
+  args: Record<string, unknown>
+): Promise<ToolOutput> => {
+  const result = await client.callTool({ name, arguments: args });
+  if (result.isError) {
+    throw new Error(`${name} failed: ${JSON.stringify(result.content)}`);
+  }
+  const structured =
+    (result.structuredContent as { output: ToolOutput } | undefined) ||
+    (JSON.parse((result.content as { text: string }[])[0].text) as { output: ToolOutput });
+  return structured.output;
+};
+
+const create = (client: Client, body: Record<string, unknown>) =>
+  call(client, 'compositionCreateTool', body);
+const get = (client: Client, id: string) => call(client, 'compositionGetTool', { id });
+const approve = (client: Client, id: string) => call(client, 'compositionApproveTool', { id });
+const remove = (client: Client, id: string) => call(client, 'compositionDeleteTool', { id });
+const list = (client: Client, args: Record<string, unknown>) =>
+  call(client, 'compositionsListTool', args);
+
 const waitForStatus = async (
-  apiKey: string,
+  client: Client,
   id: string,
   statuses: string[]
 ): Promise<CompositionResponse> => {
   const deadline = Date.now() + 180000;
   let last: CompositionResponse | null = null;
   while (Date.now() < deadline) {
-    const { json } = await api('GET', `/compositions/${id}`, apiKey);
-    last = json as CompositionResponse;
+    last = (await get(client, id)) as unknown as CompositionResponse;
     if (statuses.includes(last.status) || last.status === 'failed') {
       return last;
     }
@@ -85,7 +103,7 @@ const runningWorkflows = async (postId: string): Promise<number> => {
   return json.executions?.length || 0;
 };
 
-describe('Composições pela API pública', () => {
+describe('Composições pelo MCP', () => {
   const apiKey = `e2e-${randomUUID()}`;
   const otherApiKey = `e2e-${randomUUID()}`;
   let orgId = '';
@@ -93,6 +111,8 @@ describe('Composições pela API pública', () => {
   let linkedinId = '';
   let xId = '';
   let foreignIntegrationId = '';
+  let mcp: Client;
+  let otherMcp: Client;
   const future = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
 
   const createIntegration = (organizationId: string, providerIdentifier: string) =>
@@ -117,9 +137,13 @@ describe('Composições pela API pública', () => {
     linkedinId = (await createIntegration(orgId, 'linkedin-page')).id;
     xId = (await createIntegration(orgId, 'x')).id;
     foreignIntegrationId = (await createIntegration(otherOrgId, 'linkedin-page')).id;
+    mcp = await connect(apiKey);
+    otherMcp = await connect(otherApiKey);
   });
 
   afterAll(async () => {
+    await mcp.close();
+    await otherMcp.close();
     const orgs = [orgId, otherOrgId];
     await prisma.post.deleteMany({ where: { organizationId: { in: orgs }, parentPostId: { not: null } } });
     await prisma.post.deleteMany({ where: { organizationId: { in: orgs } } });
@@ -130,65 +154,70 @@ describe('Composições pela API pública', () => {
     await prisma.$disconnect();
   });
 
-  it('recusa requisições sem chave de API', async () => {
-    const { status } = await api('POST', '/compositions', null, {});
-    expect(status).toBe(401);
+  it('recusa conexões sem chave de API', async () => {
+    const response = await fetch(`${API_URL}/mcp`, { method: 'POST' });
+    expect(response.status).toBe(401);
+  });
+
+  it('expõe as ferramentas de composição', async () => {
+    const { tools } = await mcp.listTools();
+    expect(tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        'compositionCreateTool',
+        'compositionsListTool',
+        'compositionGetTool',
+        'compositionApproveTool',
+        'compositionDeleteTool',
+      ])
+    );
   });
 
   it('recusa payload inválido', async () => {
-    const { status } = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'carousel',
       slides: [{ headline: 'Só um slide' }],
       targets: [{ integrationId: linkedinId, content: 'x' }],
     });
-    expect(status).toBe(400);
+    expect(created.errors).toContain('carousel needs between 2 and 10 slides');
   });
 
   it('recusa canal de outra organização', async () => {
-    const { status } = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       targets: [{ integrationId: foreignIntegrationId, content: 'x' }],
     });
-    expect(status).toBe(400);
+    expect(created.errors).toContain(`Channel ${foreignIntegrationId} is not available`);
   });
 
   it('recusa na hora configurações inválidas do provider com a mensagem do campo', async () => {
-    const { status, json } = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       targets: [{ integrationId: xId, content: 'Sem configuração de respostas' }],
     });
-    expect(status).toBe(400);
-    expect(JSON.stringify(json)).toContain('who_can_reply_post');
+    expect(created.errors).toContain('who_can_reply_post');
     expect(await prisma.composition.count({ where: { organizationId: orgId } })).toBe(0);
   });
 
   it('recusa na hora configurações inválidas mesmo quando a composição exige aprovação', async () => {
-    const { status, json } = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       targets: [{ integrationId: xId, content: 'Sem configuração de respostas' }],
     });
-    expect(status).toBe(400);
-    expect(JSON.stringify(json)).toContain('who_can_reply_post');
+    expect(created.errors).toContain('who_can_reply_post');
   });
 
   it('trata página negativa na listagem como a primeira', async () => {
-    const { status, json } = await api('GET', '/compositions?page=-1', apiKey);
-    expect(status).toBe(200);
-    expect(Array.isArray(json)).toBe(true);
-  });
-
-  it('trata página não finita na listagem como a primeira', async () => {
-    const { status } = await api('GET', '/compositions?page=Infinity', apiKey);
-    expect(status).toBe(200);
+    const listed = await list(mcp, { page: -1 });
+    expect(Array.isArray(listed.compositions)).toBe(true);
   });
 
   it('recusa aprovar quando um rascunho foi apagado no painel', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
@@ -197,25 +226,22 @@ describe('Composições pela API pública', () => {
         { integrationId: xId, content: 'Canal apagado', settings: { who_can_reply_post: 'everyone' } },
       ],
     });
-    const { id } = created.json as { id: string };
-    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const id = created.id as string;
+    const ready = await waitForStatus(mcp, id, ['awaiting_approval']);
     const removed = ready.posts.find((p) => p.integration === xId)!;
     await prisma.post.update({ where: { id: removed.postId }, data: { deletedAt: new Date() } });
 
-    const approved = await api('POST', `/compositions/${id}/approve`, apiKey);
-    expect(approved.status).toBe(400);
-    expect(JSON.stringify(approved.json)).toContain(xId);
+    const approved = await approve(mcp, id);
+    expect(approved.errors).toContain(xId);
     const kept = ready.posts.find((p) => p.integration === linkedinId)!;
     expect((await prisma.post.findUniqueOrThrow({ where: { id: kept.postId } })).state).toBe('DRAFT');
-    expect((await api('GET', `/compositions/${id}`, apiKey)).json).toMatchObject({
-      status: 'awaiting_approval',
-    });
+    expect(await get(mcp, id)).toMatchObject({ status: 'awaiting_approval' });
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
   });
 
   it('aceita payload grande dentro dos limites do DTO', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
@@ -227,13 +253,12 @@ describe('Composições pela API pública', () => {
         },
       ],
     });
-    expect(created.status).toBe(201);
-    const { id } = created.json as { id: string };
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(created).toEqual({ id: expect.any(String), status: 'pending' });
+    expect(await remove(mcp, created.id as string)).toEqual({ id: created.id });
   });
 
   it('cria, aprova e exclui um carrossel', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'carousel',
       requiresApproval: true,
@@ -251,10 +276,10 @@ describe('Composições pela API pública', () => {
         },
       ],
     });
-    expect(created.status).toBe(201);
-    const { id } = created.json as { id: string };
+    expect(created.status).toBe('pending');
+    const id = created.id as string;
 
-    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const ready = await waitForStatus(mcp, id, ['awaiting_approval']);
     expect(ready.error).toBeNull();
     expect(ready.status).toBe('awaiting_approval');
     expect(ready.media).toHaveLength(3);
@@ -264,6 +289,7 @@ describe('Composições pela API pública', () => {
     }
 
     expect(ready.posts).toHaveLength(1);
+    expect(ready.posts[0].previewUrl).toContain(`/p/${ready.posts[0].postId}?share=true`);
     const draft = await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } });
     expect(draft.state).toBe('DRAFT');
     expect(draft.integrationId).toBe(linkedinId);
@@ -273,29 +299,29 @@ describe('Composições pela API pública', () => {
     );
     expect(new Date(draft.publishDate).toISOString()).toBe(future);
 
-    const approved = await api('POST', `/compositions/${id}/approve`, apiKey);
-    expect(approved.status).toBe(201);
-    expect((approved.json as CompositionResponse).status).toBe('scheduled');
+    const listed = await list(mcp, { status: 'awaiting_approval' });
+    expect((listed.compositions as CompositionResponse[]).map((c) => c.id)).toContain(id);
+
+    const approved = await approve(mcp, id);
+    expect(approved.status).toBe('scheduled');
     const queued = await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } });
     expect(queued.state).toBe('QUEUE');
     await eventually(async () => (await runningWorkflows(queued.id)) === 1);
 
-    const approvedAgain = await api('POST', `/compositions/${id}/approve`, apiKey);
-    expect(approvedAgain.status).toBe(400);
+    const approvedAgain = await approve(mcp, id);
+    expect(approvedAgain.errors).toContain('Only a composition awaiting approval can be approved');
 
-    const fromOtherOrg = await api('GET', `/compositions/${id}`, otherApiKey);
-    expect(fromOtherOrg.status).toBe(404);
+    expect(await get(otherMcp, id)).toEqual({ errors: 'Composition not found' });
 
-    const deleted = await api('DELETE', `/compositions/${id}`, apiKey);
-    expect(deleted.status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
     const removed = await prisma.post.findUniqueOrThrow({ where: { id: queued.id } });
     expect(removed.deletedAt).not.toBeNull();
     await eventually(async () => (await runningWorkflows(queued.id)) === 0);
-    expect((await api('GET', `/compositions/${id}`, apiKey)).status).toBe(404);
+    expect(await get(mcp, id)).toEqual({ errors: 'Composition not found' });
   });
 
   it('registra no status a falha de renderização e permite excluir', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'image',
       slides: [
@@ -306,20 +332,19 @@ describe('Composições pela API pública', () => {
       ],
       targets: [{ integrationId: linkedinId, content: 'Imagem' }],
     });
-    expect(created.status).toBe(201);
-    const { id } = created.json as { id: string };
+    const id = created.id as string;
 
-    const failed = await waitForStatus(apiKey, id, ['failed']);
+    const failed = await waitForStatus(mcp, id, ['failed']);
     expect(failed.status).toBe('failed');
     expect(failed.error).toContain('Could not download https://169.254.169.254/latest/meta-data.png');
     expect(failed.posts).toEqual([]);
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
-    expect((await api('GET', `/compositions/${id}`, apiKey)).status).toBe(404);
+    expect(await remove(mcp, id)).toEqual({ id });
+    expect(await get(mcp, id)).toEqual({ errors: 'Composition not found' });
   });
 
   it('agenda direto um fio de texto sem aprovação e exclui', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       targets: [
@@ -331,10 +356,9 @@ describe('Composições pela API pública', () => {
         },
       ],
     });
-    expect(created.status).toBe(201);
-    const { id } = created.json as { id: string };
+    const id = created.id as string;
 
-    const scheduled = await waitForStatus(apiKey, id, ['scheduled']);
+    const scheduled = await waitForStatus(mcp, id, ['scheduled']);
     expect(scheduled.error).toBeNull();
     expect(scheduled.media).toEqual([]);
     const thread = await prisma.post.findMany({
@@ -347,14 +371,14 @@ describe('Composições pela API pública', () => {
     ]);
     expect(thread[1].parentPostId).toBe(thread[0].id);
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
     expect(
       await prisma.post.count({ where: { organizationId: orgId, integrationId: xId, deletedAt: null } })
     ).toBe(0);
   });
 
   it('agenda um post por canal com os ids reais e exclui todos', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       targets: [
@@ -362,10 +386,9 @@ describe('Composições pela API pública', () => {
         { integrationId: xId, content: 'No X', settings: { who_can_reply_post: 'everyone' } },
       ],
     });
-    expect(created.status).toBe(201);
-    const { id } = created.json as { id: string };
+    const id = created.id as string;
 
-    const scheduled = await waitForStatus(apiKey, id, ['scheduled']);
+    const scheduled = await waitForStatus(mcp, id, ['scheduled']);
     expect(scheduled.posts.map((p) => p.integration)).toEqual([linkedinId, xId]);
     const rows = await prisma.post.findMany({
       where: { id: { in: scheduled.posts.map((p) => p.postId) } },
@@ -377,7 +400,7 @@ describe('Composições pela API pública', () => {
       ].sort()
     );
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
     expect(
       await prisma.post.count({
         where: { id: { in: scheduled.posts.map((p) => p.postId) }, deletedAt: null },
@@ -386,14 +409,14 @@ describe('Composições pela API pública', () => {
   });
 
   it('exclui também o post de um canal que nunca foi gravado na composição', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       targets: [{ integrationId: linkedinId, content: 'Canal gravado' }],
     });
-    const { id } = created.json as { id: string };
-    await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const id = created.id as string;
+    await waitForStatus(mcp, id, ['awaiting_approval']);
     const orphan = await prisma.post.create({
       data: {
         organizationId: orgId,
@@ -406,73 +429,71 @@ describe('Composições pela API pública', () => {
       select: { id: true },
     });
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
     expect((await prisma.post.findUniqueOrThrow({ where: { id: orphan.id } })).deletedAt).not.toBeNull();
   });
 
   it('trata página enorme na listagem sem erro', async () => {
-    const { status } = await api('GET', '/compositions?page=1e308', apiKey);
-    expect(status).toBe(200);
+    const listed = await list(mcp, { page: 1e308 });
+    expect(listed.compositions).toEqual([]);
   });
 
   it('exclui o rascunho mesmo depois de editado no painel', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       targets: [{ integrationId: linkedinId, content: 'Será editado' }],
     });
-    const { id } = created.json as { id: string };
-    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const id = created.id as string;
+    const ready = await waitForStatus(mcp, id, ['awaiting_approval']);
     await prisma.post.update({
       where: { id: ready.posts[0].postId },
       data: { group: randomUUID() },
     });
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
     expect(
       (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).deletedAt
     ).not.toBeNull();
   });
 
   it('revalida o rascunho editado no painel antes de aprovar', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       targets: [{ integrationId: linkedinId, content: 'Curto' }],
     });
-    const { id } = created.json as { id: string };
-    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const id = created.id as string;
+    const ready = await waitForStatus(mcp, id, ['awaiting_approval']);
     await prisma.post.update({
       where: { id: ready.posts[0].postId },
       data: { content: `<p>${'x'.repeat(4000)}</p>` },
     });
 
-    const approved = await api('POST', `/compositions/${id}/approve`, apiKey);
-    expect(approved.status).toBe(400);
-    expect(JSON.stringify(approved.json)).toContain('3000');
+    const approved = await approve(mcp, id);
+    expect(approved.errors).toContain('3000');
     expect(
       (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).state
     ).toBe('DRAFT');
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
   });
   it('não devolve à renderização uma composição que já foi agendada', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       targets: [{ integrationId: linkedinId, content: 'Já agendada' }],
     });
-    const { id } = created.json as { id: string };
-    await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const id = created.id as string;
+    await waitForStatus(mcp, id, ['awaiting_approval']);
 
     expect((await compositions.claimRendering(id)).count).toBe(0);
-    const { json } = await api('GET', `/compositions/${id}`, apiKey);
-    expect((json as CompositionResponse).status).toBe('awaiting_approval');
+    expect(await get(mcp, id)).toMatchObject({ status: 'awaiting_approval' });
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
   });
   it('reserva o agendamento para uma tentativa por vez', async () => {
     const { id } = await prisma.composition.create({
@@ -527,41 +548,41 @@ describe('Composições pela API pública', () => {
   });
   it('recusa aprovar quando o canal foi desativado durante a espera', async () => {
     const channel = await createIntegration(orgId, 'linkedin-page');
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       targets: [{ integrationId: channel.id, content: 'Canal desativado' }],
     });
-    const { id } = created.json as { id: string };
-    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const id = created.id as string;
+    const ready = await waitForStatus(mcp, id, ['awaiting_approval']);
     await prisma.integration.update({ where: { id: channel.id }, data: { disabled: true } });
 
-    const approved = await api('POST', `/compositions/${id}/approve`, apiKey);
-    expect(approved.status).toBe(400);
+    const approved = await approve(mcp, id);
+    expect(approved.errors).toEqual(expect.any(String));
     expect(
       (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).state
     ).toBe('DRAFT');
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
   });
 
   it('descarta campos fora do contrato antes de guardar a composição', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       junk: 'x'.repeat(1000),
       targets: [{ integrationId: linkedinId, content: 'Sem lixo', extra: 'y' }],
     });
-    const { id } = created.json as { id: string };
+    const id = created.id as string;
     const stored = await prisma.composition.findUniqueOrThrow({ where: { id } });
 
     expect(stored.payload).not.toContain('junk');
     expect(stored.payload).not.toContain('extra');
 
-    await waitForStatus(apiKey, id, ['awaiting_approval']);
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    await waitForStatus(mcp, id, ['awaiting_approval']);
+    expect(await remove(mcp, id)).toEqual({ id });
   });
 
   it('renova a reserva do enfileiramento só para quem a detém', async () => {
@@ -587,27 +608,26 @@ describe('Composições pela API pública', () => {
   });
   it('recusa comentários em canal que não publica comentários', async () => {
     const pinterest = await createIntegration(orgId, 'pinterest');
-    const { status, json } = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       targets: [{ integrationId: pinterest.id, content: 'Pin', comments: ['Comentário'] }],
     });
-    expect(status).toBe(400);
-    expect(JSON.stringify(json)).toContain('comments');
+    expect(created.errors).toContain('comments');
   });
 
   it('termina a limpeza de uma exclusão que parou depois de marcar a composição', async () => {
-    const created = await api('POST', '/compositions', apiKey, {
+    const created = await create(mcp, {
       date: future,
       format: 'text',
       requiresApproval: true,
       targets: [{ integrationId: linkedinId, content: 'Exclusão interrompida' }],
     });
-    const { id } = created.json as { id: string };
-    const ready = await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const id = created.id as string;
+    const ready = await waitForStatus(mcp, id, ['awaiting_approval']);
     await prisma.composition.update({ where: { id }, data: { deletedAt: new Date() } });
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect(await remove(mcp, id)).toEqual({ id });
     expect(
       (await prisma.post.findUniqueOrThrow({ where: { id: ready.posts[0].postId } })).deletedAt
     ).not.toBeNull();
@@ -625,10 +645,11 @@ describe('Composições pela API pública', () => {
       select: { id: true },
     });
 
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(404);
+    const notFound = { errors: 'Composition not found' };
+    expect(await remove(mcp, id)).toEqual(notFound);
     await prisma.composition.update({ where: { id }, data: { deletedAt: new Date() } });
-    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(404);
-    expect((await api('DELETE', `/compositions/${randomUUID()}`, apiKey)).status).toBe(404);
+    expect(await remove(mcp, id)).toEqual(notFound);
+    expect(await remove(mcp, randomUUID())).toEqual(notFound);
   });
 
   it('reserva a aprovação para uma tentativa por vez', async () => {
@@ -658,7 +679,7 @@ describe('Composições pela API pública', () => {
     });
     expect((await compositions.claimApproval(orgId, id, 'segunda')).count).toBe(1);
     expect((await compositions.holdApproval(id, 'primeira')).count).toBe(0);
-    expect((await compositions.finishApproval(id, 'primeira')).count).toBe(0);
-    expect((await compositions.finishApproval(id, 'segunda')).count).toBe(1);
+    expect((await compositions.finishApproval(id, 'primeira', '[]')).count).toBe(0);
+    expect((await compositions.finishApproval(id, 'segunda', '[]')).count).toBe(1);
   });
 });
