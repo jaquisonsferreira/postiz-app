@@ -1,10 +1,10 @@
 import {
   FC,
   KeyboardEvent,
+  MouseEvent,
   PointerEvent,
   ReactNode,
   useCallback,
-  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -25,17 +25,16 @@ export const SliderComponent: FC<{
   const [show, setShow] = useState(0);
   const container = useRef<HTMLDivElement>(null);
   const swipeStart = useRef<number | null>(null);
-
-  useEffect(() => {
-    onChange?.(show);
-  }, [show]);
+  const swiped = useRef(false);
 
   const goTo = useCallback(
     (index: number) => {
-      setShow(Math.min(Math.max(index, 0), list.length - 1));
+      const next = Math.min(Math.max(index, 0), list.length - 1);
+      setShow(next);
+      onChange?.(next);
       container.current?.focus({ preventScroll: true });
     },
-    [list.length]
+    [list.length, onChange]
   );
 
   const goToPrevious = useCallback(() => goTo(show - 1), [goTo, show]);
@@ -66,6 +65,7 @@ export const SliderComponent: FC<{
       }
       const distance = event.clientX - swipeStart.current;
       swipeStart.current = null;
+      swiped.current = Math.abs(distance) >= SWIPE_DISTANCE;
       if (distance <= -SWIPE_DISTANCE) {
         goToNext();
       }
@@ -75,6 +75,14 @@ export const SliderComponent: FC<{
     },
     [goToNext, goToPrevious]
   );
+
+  const onClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    if (swiped.current) {
+      swiped.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, []);
 
   const canGoPrevious = show > 0;
   const canGoNext = show < list.length - 1;
@@ -87,6 +95,7 @@ export const SliderComponent: FC<{
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}
       onPointerCancel={() => (swipeStart.current = null)}
+      onClickCapture={onClickCapture}
       onDragStart={(event) => event.preventDefault()}
       className={clsx(className, 'relative select-none touch-pan-y outline-none')}
     >
