@@ -92,6 +92,7 @@ export class CompositionSlideDto {
   theme?: (typeof SLIDE_THEMES)[number];
 
   @IsOptional()
+  @IsObject()
   @ValidateNested()
   @Type(() => CompositionBackgroundDto)
   background?: CompositionBackgroundDto;

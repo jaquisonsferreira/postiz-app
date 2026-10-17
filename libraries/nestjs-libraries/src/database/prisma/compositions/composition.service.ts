@@ -24,6 +24,7 @@ import {
 } from '@gitroom/nestjs-libraries/compositions/composition.slide.template';
 import {
   buildCompositionPosts,
+  compositionGroup,
   CompositionMedia,
   CompositionPostsInput,
 } from '@gitroom/nestjs-libraries/compositions/composition.posts.builder';
@@ -230,9 +231,7 @@ export class CompositionService {
       );
     }
 
-    for (const post of composition.posts) {
-      await this.queuePost(org, post.postId, post.integration);
-    }
+    await this.queuePosts(org, composition.posts);
     await this._compositionRepository.updateComposition(id, { status: 'scheduled' });
 
     return this.getComposition(org, id);
@@ -247,8 +246,20 @@ export class CompositionService {
     }
   }
 
+  // Every channel's posts carry the channel's group, so this also finds a post
+  // whose creation was never saved on the composition
+  private async deleteChannelPosts(org: string, id: string, targets: number) {
+    for (let target = 0; target < targets; target++) {
+      await this._postsService.deletePost(org, compositionGroup(id, target));
+    }
+  }
+
   async deleteComposition(org: string, id: string) {
-    await this.getComposition(org, id);
+    const composition = await this._compositionRepository.getCompositionById(id);
+    if (!composition || composition.organizationId !== org) {
+      throw new HttpException('Composition not found', 404);
+    }
+    const targets = (JSON.parse(composition.payload) as CreateCompositionDto).targets.length;
 
     try {
       const handle = await this._temporalService.client.getWorkflowHandle(`composition_${id}`);
@@ -263,15 +274,11 @@ export class CompositionService {
       );
     }
 
-    // Marked deleted before its posts are read: a scheduling still running in
-    // the worker either saved its post before this point, and it is read here,
-    // or its save is refused and it removes the post itself
+    // Marked deleted first: a scheduling still running in the worker either
+    // created its post before this point, and its group is removed here, or
+    // its save is refused and it removes the post itself
     await this._compositionRepository.deleteComposition(org, id);
-    const saved = await this._compositionRepository.getCompositionPosts(org, id);
-    await this.deletePosts(
-      org,
-      parseList<CompositionPost>(saved?.posts || null).map((post) => post.postId)
-    );
+    await this.deleteChannelPosts(org, id, targets);
     return { id };
   }
 
@@ -449,56 +456,71 @@ export class CompositionService {
     return media;
   }
 
-  // changePostStatus queues the first post and starts its workflow; the rest of
-  // a thread is published from it, so its posts only follow the state
   // changePostStatus swallows a failed workflow start, which would leave a
-  // queued post that nothing publishes: the post goes back to draft and the
-  // error is raised, so the retry queues it again
-  private async assertPublishingStarted(organizationId: string, postId: string) {
+  // queued post that nothing publishes, so the workflow is looked up after it
+  private async publishingStarted(postId: string): Promise<boolean> {
     try {
       const handle = await this._temporalService.client.getWorkflowHandle(`post_${postId}`);
       const { status } = await handle.describe();
-      if (status.name === 'RUNNING' || status.name === 'COMPLETED') {
-        return;
-      }
+      return status.name === 'RUNNING' || status.name === 'COMPLETED';
     } catch (err: unknown) {
       this._logger.warn(
         `No publishing workflow for post ${postId}: ${
           err instanceof Error ? err.message : String(err)
         }`
       );
+      return false;
     }
-    await this._postsService.changeState(postId, 'DRAFT');
-    throw new Error(`The publishing of post ${postId} could not be started`);
   }
 
-  // Only a draft is queued: a retry that runs after the post was published must
-  // not put it back in the queue and publish it a second time
-  private async queuePost(organizationId: string, postId: string, integration: string) {
-    const post = await this._postsService.getPostById(postId, organizationId);
-    if (!post || post.deletedAt) {
-      throw new CompositionValidationError(
-        `The post for channel ${integration} was deleted, delete the composition and send it again`
+  // Every draft is queued before any of them is checked, so one channel whose
+  // workflow did not start never holds the others back. Only drafts are
+  // queued: a retry that runs after a post was published never queues it again.
+  // changePostStatus queues the first post of a thread; the rest is published
+  // from it, so its posts only follow the state
+  private async queuePosts(organizationId: string, posts: CompositionPost[]) {
+    const started: CompositionPost[] = [];
+    for (const post of posts) {
+      const existing = await this._postsService.getPostById(post.postId, organizationId);
+      if (!existing || existing.deletedAt) {
+        throw new CompositionValidationError(
+          `The post for channel ${post.integration} was deleted, delete the composition and send it again`
+        );
+      }
+      if (existing.state !== 'DRAFT') {
+        continue;
+      }
+      await this._postsService.changePostStatus(organizationId, post.postId, 'schedule');
+      const [, ...thread] = await this._postsService.getPostsRecursively(
+        post.postId,
+        false,
+        organizationId,
+        true
       );
+      for (const reply of thread) {
+        await this._postsService.changeState(reply.id, 'QUEUE');
+      }
+      started.push(post);
     }
-    if (post.state !== 'DRAFT') {
-      return;
+
+    const missing: CompositionPost[] = [];
+    for (const post of started) {
+      if (!(await this.publishingStarted(post.postId))) {
+        await this._postsService.changeState(post.postId, 'DRAFT');
+        missing.push(post);
+      }
     }
-    await this._postsService.changePostStatus(organizationId, postId, 'schedule');
-    await this.assertPublishingStarted(organizationId, postId);
-    const [, ...thread] = await this._postsService.getPostsRecursively(
-      postId,
-      false,
-      organizationId,
-      true
-    );
-    for (const post of thread) {
-      await this._postsService.changeState(post.id, 'QUEUE');
+    if (missing.length) {
+      throw new Error(
+        `The publishing could not be started for channels ${missing
+          .map((post) => post.integration)
+          .join(', ')}`
+      );
     }
   }
 
   // Every channel is created as a draft and only queued once all of them
-  // exist, so a composition that fails halfway never publishes a part of it.
+  // exist, so a composition that fails while creating them publishes nothing.
   // The step is repeatable: a retry that finds every post saved finishes here
   private async finishScheduling(
     id: string,
@@ -506,23 +528,19 @@ export class CompositionService {
     requiresApproval: boolean,
     posts: CompositionPost[]
   ) {
-    // claimed first: an attempt that timed out and was failed meanwhile finds
-    // the composition failed here and queues nothing
-    const claimed = await this._compositionRepository.updateComposition(id, {
-      status: 'queueing',
-    });
+    // claimed only from a processing state: an attempt that timed out and
+    // resumes after a retry finished, an approval or a failure claims nothing
+    const claimed = await this._compositionRepository.claimQueueing(id);
     if (!claimed.count) {
-      throw new CompositionValidationError('The composition failed or was deleted');
+      return;
     }
     if (!requiresApproval) {
-      for (const post of posts) {
-        await this.queuePost(organizationId, post.postId, post.integration);
-      }
+      await this.queuePosts(organizationId, posts);
     }
-    await this._compositionRepository.updateComposition(id, {
-      status: requiresApproval ? 'awaiting_approval' : 'scheduled',
-      error: null,
-    });
+    await this._compositionRepository.finishQueueing(
+      id,
+      requiresApproval ? 'awaiting_approval' : 'scheduled'
+    );
   }
 
   async schedule(id: string): Promise<CompositionPost[]> {
@@ -568,17 +586,20 @@ export class CompositionService {
     }
 
     // One channel at a time, each post saved on the record as soon as it
-    // exists: the repository gives a new post a new id, so a retry skips the
-    // channels already saved instead of creating them twice
+    // exists, so a retry skips the channels already saved
     const posts = [...composition.posts];
     for (const [target, post] of body.posts.entries()) {
       if (posts.some((saved) => saved.target === target)) {
         continue;
       }
+      // a post an earlier attempt created without saving it is a draft in this
+      // channel's group: it is removed so the retry leaves a single post
+      await this._postsService.deletePost(composition.organizationId, compositionGroup(id, target));
       const [created] = (await this._postsService.createPost(
         composition.organizationId,
         { ...body, posts: [post] },
-        'API'
+        'API',
+        true
       )) as Omit<CompositionPost, 'target'>[];
       posts.push({ ...created, target });
 
@@ -601,16 +622,30 @@ export class CompositionService {
     return posts;
   }
 
-  // A failed composition publishes nothing: the posts it already created go too
+  // The drafts of a failed composition are removed. A channel already queued
+  // stays: its publishing workflow may have published it already, and the
+  // error says which channels those are
   async fail(id: string, error: string) {
     const composition = await this._compositionRepository.getCompositionById(id);
     if (!composition) {
       return;
     }
-    await this._compositionRepository.markFailed(id, error);
-    await this.deletePosts(
-      composition.organizationId,
-      parseList<CompositionPost>(composition.posts).map((post) => post.postId)
+    const targets = (JSON.parse(composition.payload) as CreateCompositionDto).targets.length;
+    const queued: string[] = [];
+    for (let target = 0; target < targets; target++) {
+      const saved = parseList<CompositionPost>(composition.posts).find((post) => post.target === target);
+      const existing = saved
+        ? await this._postsService.getPostById(saved.postId, composition.organizationId)
+        : null;
+      if (existing && !existing.deletedAt && existing.state !== 'DRAFT') {
+        queued.push(saved!.integration);
+        continue;
+      }
+      await this._postsService.deletePost(composition.organizationId, compositionGroup(id, target));
+    }
+    await this._compositionRepository.markFailed(
+      id,
+      queued.length ? `${error}. Already queued and kept: ${queued.join(', ')}` : error
     );
   }
 }

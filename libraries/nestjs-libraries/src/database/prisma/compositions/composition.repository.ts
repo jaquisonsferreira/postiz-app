@@ -84,19 +84,6 @@ export class CompositionRepository {
     });
   }
 
-  // Read after the composition is marked deleted, so it must not filter on it
-  getCompositionPosts(org: string, id: string) {
-    return this._composition.model.composition.findFirst({
-      where: {
-        id,
-        organizationId: org,
-      },
-      select: {
-        posts: true,
-      },
-    });
-  }
-
   // A deleted or failed composition is never written again, so an activity
   // that was still running (deleted, or timed out and failed) learns it from the count
   updateComposition(
@@ -117,6 +104,37 @@ export class CompositionRepository {
         },
       },
       data,
+    });
+  }
+
+  // Finishing starts only from a processing state: an attempt that timed out
+  // and resumes after a retry finished (or after the approval) claims nothing
+  claimQueueing(id: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: {
+          in: ['pending', 'rendering', 'scheduling', 'queueing'],
+        },
+      },
+      data: {
+        status: 'queueing',
+      },
+    });
+  }
+
+  finishQueueing(id: string, status: string) {
+    return this._composition.model.composition.updateMany({
+      where: {
+        id,
+        deletedAt: null,
+        status: 'queueing',
+      },
+      data: {
+        status,
+        error: null,
+      },
     });
   }
 

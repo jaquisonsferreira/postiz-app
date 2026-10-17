@@ -378,4 +378,29 @@ describe('Composições pela API pública', () => {
       })
     ).toBe(0);
   });
+
+  it('exclui também o post de um canal que nunca foi gravado na composição', async () => {
+    const created = await api('POST', '/compositions', apiKey, {
+      date: future,
+      format: 'text',
+      requiresApproval: true,
+      targets: [{ integrationId: linkedinId, content: 'Canal gravado' }],
+    });
+    const { id } = created.json as { id: string };
+    await waitForStatus(apiKey, id, ['awaiting_approval']);
+    const orphan = await prisma.post.create({
+      data: {
+        organizationId: orgId,
+        integrationId: linkedinId,
+        content: '<p>Órfão</p>',
+        group: `${id}-0`,
+        publishDate: new Date(future),
+        state: 'DRAFT',
+      },
+      select: { id: true },
+    });
+
+    expect((await api('DELETE', `/compositions/${id}`, apiKey)).status).toBe(200);
+    expect((await prisma.post.findUniqueOrThrow({ where: { id: orphan.id } })).deletedAt).not.toBeNull();
+  });
 });

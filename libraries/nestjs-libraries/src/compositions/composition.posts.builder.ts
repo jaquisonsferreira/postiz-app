@@ -33,6 +33,11 @@ export const captionToHtml = (text: string): string =>
     .map((line) => `<p>${escapeHtml(line)}</p>`)
     .join('');
 
+// One group per channel, kept by createPost (keepGroup), so the posts of a
+// channel can be found again even when they were never saved on the record
+export const compositionGroup = (compositionId: string, targetIndex: number): string =>
+  `${compositionId}-${targetIndex}`;
+
 export const buildCompositionPosts = (input: CompositionPostsInput): CreatePostDto => {
   if (!input.targets.length) {
     throw new CompositionValidationError('At least one channel is required');
@@ -45,7 +50,7 @@ export const buildCompositionPosts = (input: CompositionPostsInput): CreatePostD
     tags: input.tags || [],
     posts: input.targets.map((target, targetIndex) => ({
       integration: { id: target.integrationId },
-      group: input.compositionId,
+      group: compositionGroup(input.compositionId, targetIndex),
       settings: {
         ...(target.settings || {}),
         __type: target.providerIdentifier,
