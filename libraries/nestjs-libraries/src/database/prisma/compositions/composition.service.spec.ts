@@ -1,4 +1,6 @@
 import sharp from 'sharp';
+import dayjs from 'dayjs';
+import { HttpException } from '@nestjs/common';
 import { TemporalService } from 'nestjs-temporal-core';
 import { CompositionService } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.service';
 import { CompositionRepository } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.repository';
@@ -7,6 +9,7 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
+import { CompositionValidationError } from '@gitroom/nestjs-libraries/compositions/composition.errors';
 
 // The collaborators are replaced by the stubs of each test: their modules load
 // ESM-only packages that Jest can't require
@@ -47,18 +50,22 @@ const serviceWith = ({
   posts = {},
   media = {},
   temporal = {},
+  integrations = {},
+  subscriptions = {},
 }: {
   repository?: Record<string, unknown>;
   posts?: Record<string, unknown>;
   media?: Record<string, unknown>;
   temporal?: Record<string, unknown>;
+  integrations?: Record<string, unknown>;
+  subscriptions?: Record<string, unknown>;
 }) =>
   new CompositionService(
     repository as unknown as CompositionRepository,
-    {} as unknown as IntegrationService,
+    integrations as unknown as IntegrationService,
     posts as unknown as PostsService,
     media as unknown as MediaService,
-    {} as unknown as SubscriptionService,
+    subscriptions as unknown as SubscriptionService,
     { client: temporal } as unknown as TemporalService,
     {} as unknown as IntegrationManager
   );
@@ -153,6 +160,178 @@ describe('CompositionService', () => {
       await expect(service.schedule('composicao')).rejects.toThrow('canal');
 
       expect(calls.slice(3)).toEqual(['raiz DRAFT', 'resposta-1 DRAFT', 'resposta-2 DRAFT']);
+    });
+  });
+
+  describe('fundo por IA recusado', () => {
+    const rendering = (rejection: HttpException) =>
+      serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition({
+              format: 'image',
+              slides: [{ headline: 'Título', background: { type: 'ai', prompt: 'um prompt recusado' } }],
+              targets: [{ integrationId: 'canal', content: 'Legenda' }],
+            })
+          ),
+          claimRendering: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        media: {
+          generateImage: jest.fn().mockRejectedValue(rejection),
+        },
+      });
+
+    it('para a composição com a mensagem do gerador quando ele recusa o prompt', async () => {
+      const message =
+        'Your request was rejected by the AI safety system. Flagged categories: violence. Please adjust your prompt and try again.';
+
+      const error = await rendering(new HttpException(message, 422))
+        .renderMedia('composicao-recusada')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(CompositionValidationError);
+      expect((error as Error).message).toContain(message);
+    }, 60000);
+
+    it('deixa uma falha temporária do gerador para a próxima tentativa', async () => {
+      const error = await rendering(
+        new HttpException('AI generation failed, please try again later.', 500)
+      )
+        .renderMedia('composicao-falha-temporaria')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(CompositionValidationError);
+    }, 60000);
+  });
+
+  describe('limite mensal de posts do plano', () => {
+    const env = { ...process.env };
+    const periodStart = dayjs().subtract(2, 'month').subtract(3, 'day');
+    const thread = [
+      { id: 'raiz', integrationId: 'canal', settings: '{}', content: 'Fio', image: '[]', state: 'DRAFT', deletedAt: null },
+      { id: 'resposta-1', content: 'Resposta 1', image: '[]', state: 'DRAFT', deletedAt: null },
+      { id: 'resposta-2', content: 'Resposta 2', image: '[]', state: 'DRAFT', deletedAt: null },
+    ];
+
+    beforeEach(() => {
+      process.env.STRIPE_PUBLISHABLE_KEY = 'pk_test';
+    });
+    afterEach(() => {
+      process.env = { ...env };
+    });
+
+    const withPlan = (
+      subscription: { subscriptionTier: string; createdAt: Date } | null,
+      used: number
+    ) => {
+      const changePostStatus = jest.fn();
+      const changeState = jest.fn();
+      const countPostsFromDay = jest.fn().mockResolvedValue(used);
+      const claimApproval = jest.fn().mockResolvedValue({ count: 1 });
+      const service = serviceWith({
+        repository: {
+          getCompositionById: jest.fn().mockResolvedValue(
+            storedComposition(
+              { format: 'text', targets: [{ integrationId: 'canal', content: 'Fio' }] },
+              [{ postId: 'raiz', integration: 'canal', target: 0 }]
+            )
+          ),
+          getComposition: jest.fn().mockResolvedValue({
+            id: 'composicao',
+            status: 'awaiting_approval',
+            media: null,
+            posts: JSON.stringify([{ postId: 'raiz', integration: 'canal', target: 0 }]),
+          }),
+          claimQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          holdQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          finishQueueing: jest.fn().mockResolvedValue({ count: 1 }),
+          claimApproval,
+        },
+        posts: {
+          getPostById: jest.fn().mockResolvedValue({ id: 'raiz', state: 'DRAFT', deletedAt: null }),
+          getPostsRecursively: jest.fn().mockResolvedValue(thread),
+          validatePosts: jest.fn().mockResolvedValue([]),
+          countPostsFromDay,
+          changePostStatus,
+          changeState,
+        },
+        integrations: {
+          getIntegrationById: jest
+            .fn()
+            .mockResolvedValue({ id: 'canal', deletedAt: null, disabled: false }),
+        },
+        subscriptions: {
+          getSubscription: jest.fn().mockResolvedValue(subscription),
+        },
+        temporal: {
+          getWorkflowHandle: jest.fn().mockResolvedValue({
+            describe: jest.fn().mockResolvedValue({ status: { name: 'RUNNING' } }),
+          }),
+        },
+      });
+      return { service, changePostStatus, changeState, countPostsFromDay, claimApproval };
+    };
+
+    it('para a composição sem enfileirar quando o fio passa do limite do mês', async () => {
+      const { service, changePostStatus, changeState } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999998
+      );
+
+      const error = await service.schedule('composicao').catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(CompositionValidationError);
+      expect((error as Error).message).toContain('maximum number of posts');
+      expect(changeState).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('enfileira o fio que cabe no que resta do mês, contado desde o início do período', async () => {
+      const { service, changePostStatus, countPostsFromDay } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999997
+      );
+
+      await service.schedule('composicao');
+
+      expect(countPostsFromDay).toHaveBeenCalledWith('org', periodStart.add(2, 'month').toDate());
+      expect(changePostStatus).toHaveBeenCalledWith('org', 'raiz', 'schedule');
+    });
+
+    it('não enfileira posts de uma organização sem assinatura', async () => {
+      const { service, changePostStatus } = withPlan(null, 0);
+
+      await expect(service.schedule('composicao')).rejects.toBeInstanceOf(
+        CompositionValidationError
+      );
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('recusa a aprovação que passaria do limite do mês antes de reservá-la', async () => {
+      const { service, claimApproval, changePostStatus } = withPlan(
+        { subscriptionTier: 'STANDARD', createdAt: periodStart.toDate() },
+        999998
+      );
+
+      const error = await service
+        .approveComposition('org', 'composicao')
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(402);
+      expect(claimApproval).not.toHaveBeenCalled();
+      expect(changePostStatus).not.toHaveBeenCalled();
+    });
+
+    it('não conta posts quando a cobrança está desligada', async () => {
+      delete process.env.STRIPE_PUBLISHABLE_KEY;
+      const { service, changePostStatus, countPostsFromDay } = withPlan(null, 0);
+
+      await service.schedule('composicao');
+
+      expect(countPostsFromDay).not.toHaveBeenCalled();
+      expect(changePostStatus).toHaveBeenCalled();
     });
   });
 });
