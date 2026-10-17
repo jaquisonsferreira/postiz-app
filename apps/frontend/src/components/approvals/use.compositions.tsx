@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 
 export interface CompositionSlide {
@@ -45,4 +45,37 @@ export const useCompositions = (status?: string) => {
     return (await (await fetch(path)).json()) as Composition[];
   }, []);
   return useSWR(`/compositions${status ? `?status=${status}` : ''}`, load);
+};
+
+// Approving or rejecting changes both the queue and the menu badge
+export const useCompositionActions = () => {
+  const fetch = useFetch();
+  const { mutate } = useSWRConfig();
+  const refresh = useCallback(async () => {
+    await mutate((key) => typeof key === 'string' && key.startsWith('/compositions'));
+  }, [mutate]);
+
+  const approve = useCallback(
+    async (id: string) => {
+      const response = await fetch(`/compositions/${id}/approve`, { method: 'POST' });
+      await refresh();
+      if (!response.ok) {
+        throw new Error(((await response.json()) as { message?: string }).message || response.statusText);
+      }
+    },
+    [refresh]
+  );
+
+  const reject = useCallback(
+    async (id: string) => {
+      const response = await fetch(`/compositions/${id}`, { method: 'DELETE' });
+      await refresh();
+      if (!response.ok) {
+        throw new Error(((await response.json()) as { message?: string }).message || response.statusText);
+      }
+    },
+    [refresh]
+  );
+
+  return { approve, reject };
 };

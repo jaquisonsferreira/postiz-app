@@ -64,7 +64,7 @@ describe('Aprovações', () => {
   it('aprova e agenda uma composição', async () => {
     const { page } = session;
     await page.goto(`${FRONTEND_URL}/approvals?id=${approveId}`);
-    await page.getByRole('button', { name: 'Aprovar e agendar' }).click();
+    await page.getByRole('button', { name: 'Aprovar e agendar', exact: true }).click();
     await page.getByTestId('approval-queue').getByText('Carrossel para aprovar').waitFor({ state: 'detached' });
 
     expect((await prisma.composition.findUniqueOrThrow({ where: { id: approveId } })).status).toBe('scheduled');
@@ -73,7 +73,7 @@ describe('Aprovações', () => {
   it('rejeita uma composição e ela some da fila', async () => {
     const { page } = session;
     await page.goto(`${FRONTEND_URL}/approvals?id=${rejectId}`);
-    await page.getByRole('button', { name: 'Rejeitar' }).click();
+    await page.getByRole('button', { name: 'Rejeitar', exact: true }).click();
     await page.getByRole('button', { name: 'Sim, exclua!' }).click();
     await page.getByTestId('approval-queue').getByText('Carrossel para rejeitar').waitFor({ state: 'detached' });
 

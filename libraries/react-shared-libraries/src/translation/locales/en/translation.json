@@ -930,5 +930,20 @@
   "post_status": "Post status",
   "no_pending_approvals": "No composition is waiting for approval.",
   "composition_summary": "{{slides}} slides · {{channels}} channels",
-  "no_posts_in_status": "No posts here yet. Create a post or approve a composition."
+  "no_posts_in_status": "No posts here yet. Create a post or approve a composition.",
+  "composition_approved": "Composition approved and scheduled",
+  "reject_composition_question": "Reject this composition? Its drafts will be deleted.",
+  "composition_rejected": "Composition rejected",
+  "composition": "Composition",
+  "format_carousel": "Carousel",
+  "format_image": "Image",
+  "format_text": "Text",
+  "scheduled_for": "Scheduled for",
+  "reject": "Reject",
+  "approve_and_schedule": "Approve and schedule",
+  "slides": "Slides",
+  "slide_position": "Slide {{index}} of {{total}}",
+  "captions": "Captions",
+  "queue_empty": "Queue is clear",
+  "queue": "Queue"
 }
