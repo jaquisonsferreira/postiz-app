@@ -176,4 +176,16 @@ describe('CreateCompositionDto', () => {
       await errorsOf(payload({ tags: [{ value: 'x'.repeat(101), label: 'y'.repeat(101) }] }))
     ).toEqual(expect.arrayContaining(['tags.0.value', 'tags.0.label']));
   });
+  it('limita o tamanho das configurações do provider', async () => {
+    expect(
+      await errorsOf(
+        payload({ targets: [{ integrationId: 'ig-1', content: 'x', settings: { big: 'a'.repeat(30000) } }] })
+      )
+    ).toContain('targets.0.settings');
+    expect(
+      await errorsOf(
+        payload({ targets: [{ integrationId: 'ig-1', content: 'x', settings: { post_type: 'post' } }] })
+      )
+    ).toEqual([]);
+  });
 });
