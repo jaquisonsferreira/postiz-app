@@ -421,6 +421,21 @@ describe('AdsService', () => {
       expect(repository.updateCampaign).toHaveBeenCalledWith('campanha', { status: 'paused' });
     });
 
+    it('keeps a campaign paused while its account is over the monthly cap', async () => {
+      const setCampaignStatus = jest.fn(async () => undefined);
+      const repository = {
+        getCampaign: jest.fn(async () => storedCampaign({ status: 'paused' })),
+        getRule: jest.fn(async () => ({ cappedMonth: new Date().toISOString().slice(0, 7) })),
+        updateCampaign: jest.fn(),
+      };
+      const service = serviceWith(repository, fakeProvider({ setCampaignStatus }));
+
+      await expect(service.setCampaignStatus('org', 'campanha', 'active')).rejects.toEqual(
+        new HttpException('This ad account reached its monthly budget', 400)
+      );
+      expect(setCampaignStatus).not.toHaveBeenCalled();
+    });
+
     it('changes the budget in the same kind the campaign already has', async () => {
       const updateCampaignBudget = jest.fn(async () => undefined);
       const repository = {

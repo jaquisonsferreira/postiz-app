@@ -78,11 +78,13 @@ const setup = ({
   provider = metaProvider(),
   boosts = {} as Record<string, unknown>,
   start = jest.fn(async () => ({})),
+  temporal = true,
 } = {}) => {
   const boostRepository = {
     getPublishedPost: jest.fn(async () => post),
     createBoost: jest.fn(async (data: Record<string, unknown>) => ({ id: 'impulso', ...data })),
     getBoost: jest.fn(),
+    claimBoost: jest.fn(async () => 1),
     updateBoost: jest.fn(async (id: string, data: Record<string, unknown>) => ({ id, ...data })),
     getBoostToLaunch: jest.fn(),
     autoBoostRules: jest.fn(async () => []),
@@ -110,7 +112,7 @@ const setup = ({
         identifier === 'facebook' ? { promotableReference } : {},
     } as unknown as IntegrationManager,
     {
-      client: { getRawClient: () => ({ workflow: { start } }) },
+      client: { getRawClient: () => (temporal ? { workflow: { start } } : undefined) },
     } as unknown as TemporalService
   );
   return { service, boostRepository, adsRepository, adsService, provider, start, promotableReference };
@@ -267,6 +269,27 @@ describe('AdsBoostService', () => {
       );
     });
 
+    it('refuses before saving anything when boosting is not reachable', async () => {
+      const { service, boostRepository } = setup({ temporal: false });
+
+      await expect(service.create('org', request, 'manual')).rejects.toEqual(
+        new HttpException('Boosting is not available right now', 503)
+      );
+      expect(boostRepository.createBoost).not.toHaveBeenCalled();
+    });
+
+    it('refuses a minimum age above the maximum', async () => {
+      const { service } = setup();
+
+      await expect(
+        service.create(
+          'org',
+          { ...request, audience: { countries: ['BR'], ageMin: 40, ageMax: 20 } },
+          'manual'
+        )
+      ).rejects.toEqual(new HttpException('The minimum age must not be above the maximum', 400));
+    });
+
     it('marks the boost as failed when the workflow cannot start', async () => {
       const { service, boostRepository } = setup({
         start: jest.fn(async () => {
@@ -286,26 +309,53 @@ describe('AdsBoostService', () => {
 
   describe('approving', () => {
     it('launches an approved boost and keeps a rejected one stopped', async () => {
-      const getBoost = jest.fn(async () => ({ id: 'impulso', status: 'awaiting_approval' }));
-      const { service, boostRepository, start } = setup({ boosts: { getBoost } });
+      const { service, boostRepository, start } = setup();
 
       await service.approve('org', 'impulso');
-      expect(boostRepository.updateBoost).toHaveBeenCalledWith('impulso', { status: 'launching' });
+      expect(boostRepository.claimBoost).toHaveBeenCalledWith('org', 'impulso', 'launching');
       expect(start).toHaveBeenCalledTimes(1);
 
       await service.reject('org', 'impulso');
-      expect(boostRepository.updateBoost).toHaveBeenCalledWith('impulso', { status: 'rejected' });
-      expect(getBoost).toHaveBeenCalledWith('org', 'impulso');
+      expect(boostRepository.claimBoost).toHaveBeenCalledWith('org', 'impulso', 'rejected');
+      expect(start).toHaveBeenCalledTimes(1);
     });
 
-    it('only decides boosts that wait for approval', async () => {
-      const { service } = setup({
-        boosts: { getBoost: jest.fn(async () => ({ id: 'impulso', status: 'active' })) },
+    it('only decides boosts that wait for approval, once', async () => {
+      const { service, start } = setup({
+        boosts: {
+          claimBoost: jest.fn(async () => 0),
+          getBoost: jest.fn(async () => ({ id: 'impulso', status: 'launching' })),
+        },
       });
 
       await expect(service.approve('org', 'impulso')).rejects.toEqual(
         new HttpException('This boost is not waiting for approval', 400)
       );
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it('answers not found for a boost of another organization', async () => {
+      const { service } = setup({
+        boosts: { claimBoost: jest.fn(async () => 0), getBoost: jest.fn(async () => null) },
+      });
+
+      await expect(service.reject('org', 'impulso')).rejects.toEqual(
+        new HttpException('Boost not found', 404)
+      );
+    });
+
+    it('keeps the boost launching when its workflow was already started', async () => {
+      const already = Object.assign(new Error('Workflow execution already started'), {
+        name: 'WorkflowExecutionAlreadyStartedError',
+      });
+      const { service, boostRepository } = setup({
+        start: jest.fn(async () => {
+          throw already;
+        }),
+      });
+
+      await service.approve('org', 'impulso');
+      expect(boostRepository.updateBoost).not.toHaveBeenCalled();
     });
   });
 
@@ -407,6 +457,20 @@ describe('AdsBoostService', () => {
       );
     });
 
+    it('stops when the platform gave no campaign id', async () => {
+      const provider = metaProvider({
+        boostPost: jest.fn(async () => ({ campaignId: null, adSetId: null, creativeId: null, adId: null })),
+      } as Partial<AdsProvider>);
+      const { service, adsRepository } = setup({
+        provider,
+        boosts: { getBoostToLaunch: jest.fn(async () => toLaunch()) },
+      });
+
+      await expect(service.launch('impulso')).rejects.toThrow('Meta Ads did not create the campaign');
+      expect(provider.setCampaignStatus).not.toHaveBeenCalled();
+      expect(adsRepository.upsertCampaign).not.toHaveBeenCalled();
+    });
+
     it('does nothing for a boost that is no longer launching', async () => {
       const { service, provider } = setup({
         boosts: { getBoostToLaunch: jest.fn(async () => toLaunch({ status: 'rejected' })) },
@@ -443,10 +507,49 @@ describe('AdsBoostService', () => {
       });
 
       expect(await service.autoBoost()).toEqual({ created: 2, failed: 0 });
-      expect(boostRepository.postsToAutoBoost).toHaveBeenCalledWith('canal', new Date('2026-10-01T00:00:00Z'));
+      expect(boostRepository.postsToAutoBoost).toHaveBeenCalledWith('canal', new Date('2026-10-17T12:00:00Z'));
       expect(boostRepository.createBoost).toHaveBeenCalledWith(
         expect.objectContaining({ origin: 'auto', postId: 'post', status: 'launching' })
       );
+    });
+  });
+
+  describe('automatic boost limits', () => {
+    const autoRule = (createdAt: Date) => ({
+      id: 'automatico',
+      organizationId: 'org',
+      integrationId: 'canal',
+      adAccountId: 'conta',
+      objective: 'engagement',
+      budgetType: 'daily',
+      budgetAmount: 2000,
+      days: 7,
+      audience: JSON.stringify(request.audience),
+      destinationUrl: null,
+      texts: null,
+      createdAt,
+    });
+
+    it('only looks at posts published after the rule was turned on', async () => {
+      const createdAt = new Date('2026-10-18T09:00:00Z');
+      const { service, boostRepository } = setup({
+        boosts: { autoBoostRules: jest.fn(async () => [autoRule(createdAt)]) },
+      });
+
+      await service.autoBoost();
+      expect(boostRepository.postsToAutoBoost).toHaveBeenCalledWith('canal', createdAt);
+    });
+
+    it('skips an account that reached its monthly cap', async () => {
+      const { service, boostRepository } = setup({
+        rule: { approvalThreshold: null, cappedMonth: '2026-10' },
+        boosts: {
+          autoBoostRules: jest.fn(async () => [autoRule(new Date('2026-10-01T00:00:00Z'))]),
+        },
+      });
+
+      expect(await service.autoBoost()).toEqual({ created: 0, failed: 0 });
+      expect(boostRepository.postsToAutoBoost).not.toHaveBeenCalled();
     });
   });
 
