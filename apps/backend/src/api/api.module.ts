@@ -1,4 +1,5 @@
 import { CompositionsController } from '@gitroom/backend/api/routes/compositions.controller';
+import { AdsController } from '@gitroom/backend/api/routes/ads.controller';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AuthController } from '@gitroom/backend/api/routes/auth.controller';
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
@@ -80,6 +81,7 @@ const authenticatedController = [
   AnnouncementsController,
   AdminController,
   CompositionsController,
+  AdsController,
 ];
 @Module({
   imports: [UploadModule],

@@ -21,6 +21,8 @@ import { PillButton } from '@gitroom/frontend/components/ui/pill.button';
 import { StatusPill } from '@gitroom/frontend/components/ui/status.pill';
 import { ChannelIcon } from '@gitroom/frontend/components/ui/channel.icon';
 import { PostPreview, usePostPreview } from '@gitroom/frontend/components/posts/post.preview.modal';
+import { BoostApprovals } from '@gitroom/frontend/components/ads/ads.boost.approvals';
+import { useBoosts } from '@gitroom/frontend/components/ads/use.ads';
 
 interface Channel {
   id: string;
@@ -172,6 +174,7 @@ export const ApprovalsComponent: FC = () => {
   const { data: queue, isLoading } = useCompositions('awaiting_approval');
   const pendingTotal = usePendingApprovals();
   const { data: channels = [] } = useIntegrationList();
+  const { data: boosts = [] } = useBoosts('awaiting_approval');
 
   const selectedId = search.get('id');
   const selected = queue?.find((item) => item.id === selectedId) || queue?.[0];
@@ -188,18 +191,23 @@ export const ApprovalsComponent: FC = () => {
 
   if (!queue?.length) {
     return (
-      <div className="flex-1">
+      <div className="flex-1 min-w-0 flex flex-col gap-[20px]">
+        <BoostApprovals />
+        {!boosts.length && (
         <Card className="items-center text-center py-[64px]">
           <span className="text-[22px] font-[500]">{t('queue_empty', 'Queue is clear')}</span>
           <span className="text-[16px] text-textItemBlur">
             {t('no_pending_approvals', 'No composition is waiting for approval.')}
           </span>
         </Card>
+        )}
       </div>
     );
   }
 
   return (
+    <div className="flex-1 min-w-0 flex flex-col gap-[20px]">
+    <BoostApprovals />
     <div className="flex-1 min-w-0 flex gap-[20px] items-start mobile:flex-col">
       <PostPreview />
       <Card className="w-[360px] mobile:w-full shrink-0 !p-[16px] !gap-[8px]" testId="approval-queue">
@@ -226,6 +234,7 @@ export const ApprovalsComponent: FC = () => {
         ))}
       </Card>
       {selected && <Detail key={selected.id} composition={selected} channels={channels} onDone={clearSelection} />}
+    </div>
     </div>
   );
 };

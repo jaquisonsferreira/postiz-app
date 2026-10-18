@@ -24,6 +24,12 @@ import { CompositionsListTool } from '@gitroom/nestjs-libraries/chat/tools/compo
 import { CompositionGetTool } from '@gitroom/nestjs-libraries/chat/tools/composition.get.tool';
 import { CompositionApproveTool } from '@gitroom/nestjs-libraries/chat/tools/composition.approve.tool';
 import { CompositionDeleteTool } from '@gitroom/nestjs-libraries/chat/tools/composition.delete.tool';
+import { AdsAccountsListTool } from '@gitroom/nestjs-libraries/chat/tools/ads.accounts.list.tool';
+import { AdsCampaignsReportTool } from '@gitroom/nestjs-libraries/chat/tools/ads.campaigns.report.tool';
+import { AdsBoostOptionsTool } from '@gitroom/nestjs-libraries/chat/tools/ads.boost.options.tool';
+import { AdsBoostPostTool } from '@gitroom/nestjs-libraries/chat/tools/ads.boost.post.tool';
+import { AdsCampaignStatusTool } from '@gitroom/nestjs-libraries/chat/tools/ads.campaign.status.tool';
+import { AdsCampaignBudgetTool } from '@gitroom/nestjs-libraries/chat/tools/ads.campaign.budget.tool';
 
 export const toolList = [
   IntegrationListTool,
@@ -39,6 +45,12 @@ export const toolList = [
   CompositionGetTool,
   CompositionApproveTool,
   CompositionDeleteTool,
+  AdsAccountsListTool,
+  AdsCampaignsReportTool,
+  AdsBoostOptionsTool,
+  AdsBoostPostTool,
+  AdsCampaignStatusTool,
+  AdsCampaignBudgetTool,
   GenerateVideoOptionsTool,
   VideoFunctionTool,
   GenerateVideoTool,

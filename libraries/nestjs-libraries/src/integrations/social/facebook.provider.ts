@@ -1,3 +1,4 @@
+import { AdsPromotableReference } from '@gitroom/nestjs-libraries/integrations/ads/ads.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -982,6 +983,17 @@ export class FacebookProvider extends SocialAbstract implements SocialProvider {
         status: 'success',
       },
     ];
+  }
+
+  async promotableReference(
+    accessToken: string,
+    releaseId: string,
+    integration: Integration
+  ): Promise<AdsPromotableReference> {
+    return {
+      type: 'meta-post',
+      id: releaseId.includes('_') ? releaseId : `${integration.internalId}_${releaseId}`,
+    };
   }
 
   async comment(

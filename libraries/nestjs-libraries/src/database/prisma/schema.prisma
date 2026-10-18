@@ -21,6 +21,9 @@ model Organization {
   allowTrial          Boolean              @default(false)
   isTrailing          Boolean              @default(false)
   shortlink           ShortLinkPreference  @default(ASK)
+  adAccounts          AdAccount[]
+  adBoosts            AdBoost[]
+  adAutoBoosts        AdAutoBoost[]
   autoPost            AutoPost[]
   Comments            Comments[]
   credits             Credits[]
@@ -416,6 +419,7 @@ model Integration {
   webhooks              IntegrationsWebhooks[]
   orderItems            OrderItems[]
   plugs                 Plugs[]
+  adAutoBoost           AdAutoBoost?
   posts                 Post[]
 
   @@unique([organizationId, internalId])
@@ -513,6 +517,7 @@ model Post {
   childrenPost               Post[]                    @relation("parentPostId")
   submittedForOrder          Orders?                   @relation(fields: [submittedForOrderId], references: [id])
   submittedForOrganization   Organization?             @relation("submittedForOrg", fields: [submittedForOrganizationId], references: [id])
+  adBoosts                   AdBoost[]
   tags                       TagsPosts[]
 
   @@index([group])
@@ -743,6 +748,143 @@ model ThirdParty {
   @@unique([organizationId, internalId])
   @@index([organizationId])
   @@index([deletedAt])
+}
+
+model AdAccount {
+  id              String        @id @default(uuid())
+  organizationId  String
+  provider        String
+  externalId      String
+  loginCustomerId String?
+  name            String
+  currency        String
+  timezone        String
+  token           String
+  refreshToken    String?
+  tokenExpiration DateTime?
+  refreshNeeded   Boolean       @default(false)
+  lastSyncAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  organization    Organization  @relation(fields: [organizationId], references: [id])
+  campaigns       AdCampaign[]
+  budgetRule      AdBudgetRule?
+  boosts          AdBoost[]
+  autoBoosts      AdAutoBoost[]
+
+  @@unique([organizationId, provider, externalId])
+  @@index([organizationId])
+  @@index([deletedAt])
+}
+
+model AdCampaign {
+  id           String          @id @default(uuid())
+  adAccountId  String
+  externalId   String
+  name         String
+  status       String
+  objective    String
+  budgetType   String?
+  budgetAmount Int?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  adAccount    AdAccount       @relation(fields: [adAccountId], references: [id])
+  metrics      AdMetricDaily[]
+
+  @@unique([adAccountId, externalId])
+  @@index([adAccountId])
+}
+
+model AdMetricDaily {
+  id           String     @id @default(uuid())
+  adCampaignId String
+  date         DateTime   @db.Date
+  impressions  Int
+  reach        Int?
+  clicks       Int
+  spend        Int
+  conversions  Float
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  adCampaign   AdCampaign @relation(fields: [adCampaignId], references: [id])
+
+  @@unique([adCampaignId, date])
+  @@index([date])
+}
+
+// Money in cents of the account currency. The months are YYYY-MM in UTC and
+// remember the cap and the alert were already handled
+model AdBudgetRule {
+  id                String    @id @default(uuid())
+  adAccountId       String    @unique
+  monthlyCap        Int?
+  approvalThreshold Int?
+  alertAt           Int?
+  alertedMonth      String?
+  cappedMonth       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  adAccount         AdAccount @relation(fields: [adAccountId], references: [id])
+}
+
+// A published post promoted from the Pauta. The external ids are saved after
+// every step on the platform, so launching again never creates a second campaign
+model AdBoost {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  adAccountId        String
+  postId             String
+  origin             String
+  status             String
+  name               String
+  reference          String
+  objective          String
+  budgetType         String
+  budgetAmount       Int
+  days               Int
+  audience           String
+  destinationUrl     String?
+  texts              String?
+  startDate          DateTime?
+  endDate            DateTime?
+  externalCampaignId String?
+  externalAdSetId    String?
+  externalCreativeId String?
+  externalAdId       String?
+  error              String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  deletedAt          DateTime?
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  adAccount          AdAccount    @relation(fields: [adAccountId], references: [id])
+  post               Post         @relation(fields: [postId], references: [id])
+
+  @@index([organizationId])
+  @@index([postId])
+  @@index([status])
+}
+
+// Every new post published on the channel is promoted with these settings
+model AdAutoBoost {
+  id             String       @id @default(uuid())
+  organizationId String
+  integrationId  String       @unique
+  adAccountId    String
+  objective      String
+  budgetType     String
+  budgetAmount   Int
+  days           Int
+  audience       String
+  destinationUrl String?
+  texts          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  integration    Integration  @relation(fields: [integrationId], references: [id])
+  adAccount      AdAccount    @relation(fields: [adAccountId], references: [id])
+
+  @@index([organizationId])
 }
 
 model Errors {

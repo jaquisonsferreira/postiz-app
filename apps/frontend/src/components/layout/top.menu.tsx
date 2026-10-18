@@ -7,6 +7,7 @@ import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { MenuItem } from '@gitroom/frontend/components/new-layout/menu-item';
 import { usePendingApprovals } from '@gitroom/frontend/components/approvals/use.compositions';
+import { useBoosts } from '@gitroom/frontend/components/ads/use.ads';
 
 type MenuSection = 'content' | 'automation' | 'settings';
 
@@ -41,6 +42,7 @@ const Icon: FC<{ children: ReactNode }> = ({ children }) => (
 export const useMenuItem = () => {
   const t = useT();
   const pendingApprovals = usePendingApprovals();
+  const { data: pendingBoosts = [] } = useBoosts('awaiting_approval');
 
   const all = [
     {
@@ -118,11 +120,22 @@ export const useMenuItem = () => {
       section: 'automation',
       name: t('approvals', 'Approvals'),
       path: '/approvals',
-      badge: pendingApprovals,
+      badge: pendingApprovals + pendingBoosts.length,
       icon: (
         <Icon>
           <rect x="3" y="3" width="18" height="18" rx="3" />
           <path d="M8 12l3 3 5-6" />
+        </Icon>
+      ),
+    },
+    {
+      section: 'automation',
+      name: t('ads', 'Ads'),
+      path: '/ads',
+      icon: (
+        <Icon>
+          <path d="M3 11v2a1 1 0 001 1h2l5 4V6L6 10H4a1 1 0 00-1 1z" />
+          <path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" />
         </Icon>
       ),
     },

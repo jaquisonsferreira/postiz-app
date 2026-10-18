@@ -1,3 +1,4 @@
+import { AdsPromotableReference } from '@gitroom/nestjs-libraries/integrations/ads/ads.interface';
 import { Integration } from '@prisma/client';
 
 export interface ClientInformation {
@@ -46,6 +47,11 @@ export interface IAuthenticator {
     | { unavailable: true }
     | undefined
   >; // Final id + URL to persist when the stored releaseId is still a publish id, pending when the platform has no final id yet, unavailable when the post will never get one, undefined when nothing to resolve
+  promotableReference?(
+    accessToken: string,
+    releaseId: string,
+    integration: Integration
+  ): Promise<AdsPromotableReference | undefined>; // How an ads provider finds this published post to promote it
   releaseUrl?(
     accessToken: string,
     releaseId: string,

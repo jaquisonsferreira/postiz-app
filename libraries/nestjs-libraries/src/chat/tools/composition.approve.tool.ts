@@ -5,11 +5,11 @@ import { Injectable } from '@nestjs/common';
 import { checkAuth } from '@gitroom/nestjs-libraries/chat/auth.context';
 import { CompositionService } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.service';
 import {
-  asToolErrors,
   compositionErrors,
   compositionOutput,
   presentComposition,
 } from '@gitroom/nestjs-libraries/chat/tools/composition.tool.output';
+import { asToolErrors } from '@gitroom/nestjs-libraries/chat/tools/tool.errors';
 
 @Injectable()
 export class CompositionApproveTool implements AgentToolInterface {
