@@ -250,4 +250,204 @@ describe('GoogleAdsProvider', () => {
       new AdsApiError('The caller does not have permission')
     );
   });
+
+  describe('promoting a YouTube video', () => {
+    const account = { externalId: '300', currency: 'BRL', loginCustomerId: '100' };
+    const input = {
+      name: 'Impulsionar: Tutorial',
+      reference: { type: 'youtube-video', id: 'yt123', logoUrl: 'https://cdn.example/logo.png' },
+      objective: 'traffic' as const,
+      budgetType: 'daily' as const,
+      budgetAmount: 5000,
+      startDate: new Date('2026-10-18T12:00:00Z'),
+      endDate: new Date('2026-10-25T12:00:00Z'),
+      audience: { countries: ['BR', 'PT'], ageMin: 18, ageMax: 65 },
+      destinationUrl: 'https://loja.example',
+      texts: {
+        headline: 'Aprenda em 5 minutos',
+        longHeadline: 'O tutorial completo para agendar posts',
+        description: 'Assista e comece hoje',
+        businessName: 'Pauta',
+      },
+    };
+
+    const mutation = {
+      mutateOperationResponses: [
+        { campaignBudgetResult: { resourceName: 'customers/300/campaignBudgets/1' } },
+        { campaignResult: { resourceName: 'customers/300/campaigns/555' } },
+        { adGroupResult: { resourceName: 'customers/300/adGroups/666' } },
+        { assetResult: { resourceName: 'customers/300/assets/7' } },
+        { assetResult: { resourceName: 'customers/300/assets/8' } },
+        { adGroupAdResult: { resourceName: 'customers/300/adGroupAds/666~777' } },
+      ],
+    };
+
+    const respondWithLogo = (spy: jest.SpyInstance) =>
+      spy.mockImplementation(async (url: string | URL) =>
+        String(url) === 'https://cdn.example/logo.png'
+          ? new Response(Buffer.from('logo-bytes'))
+          : respond({})
+      );
+
+    it('creates a paused Demand Gen campaign with the video in one atomic call', async () => {
+      const spy = jest.spyOn(global, 'fetch');
+      spy
+        .mockResolvedValueOnce(new Response(Buffer.from('logo-bytes')))
+        .mockResolvedValueOnce(
+          respond({
+            results: [
+              { geoTargetConstant: { resourceName: 'geoTargetConstants/2076' } },
+              { geoTargetConstant: { resourceName: 'geoTargetConstants/2620' } },
+            ],
+          })
+        )
+        .mockResolvedValueOnce(respond(mutation));
+      const save = jest.fn();
+
+      const result = await provider.boostPost('access', account, input, {}, save);
+
+      expect(String(spy.mock.calls[0][0])).toBe('https://cdn.example/logo.png');
+      expect(JSON.parse(sentBody(spy, 1)).query).toContain(
+        "geo_target_constant.country_code IN ('BR', 'PT')"
+      );
+      expect(String(spy.mock.calls[2][0])).toBe(
+        'https://googleads.googleapis.com/v25/customers/300/googleAds:mutate'
+      );
+      expect(sentHeaders(spy, 2).get('login-customer-id')).toBe('100');
+      const operations = JSON.parse(sentBody(spy, 2)).mutateOperations;
+      expect(operations[0].campaignBudgetOperation.create).toEqual({
+        resourceName: 'customers/300/campaignBudgets/-1',
+        name: 'Impulsionar: Tutorial',
+        amountMicros: '50000000',
+        deliveryMethod: 'STANDARD',
+        explicitlyShared: false,
+      });
+      expect(operations[1].campaignOperation.create).toMatchObject({
+        resourceName: 'customers/300/campaigns/-2',
+        status: 'PAUSED',
+        advertisingChannelType: 'DEMAND_GEN',
+        campaignBudget: 'customers/300/campaignBudgets/-1',
+        startDateTime: '2026-10-18 00:00:00',
+        endDateTime: '2026-10-25 23:59:59',
+        containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
+      });
+      expect(operations[3].assetOperation.create.youtubeVideoAsset).toEqual({ youtubeVideoId: 'yt123' });
+      expect(operations[4].assetOperation.create.imageAsset).toEqual({
+        data: Buffer.from('logo-bytes').toString('base64'),
+      });
+      const ad = operations[5].adGroupAdOperation.create;
+      expect(ad.adGroup).toBe('customers/300/adGroups/-3');
+      expect(ad.ad.finalUrls).toEqual(['https://loja.example']);
+      expect(ad.ad.demandGenVideoResponsiveAd).toEqual({
+        headlines: [{ text: 'Aprenda em 5 minutos' }],
+        longHeadlines: [{ text: 'O tutorial completo para agendar posts' }],
+        descriptions: [{ text: 'Assista e comece hoje' }],
+        businessName: { text: 'Pauta' },
+        videos: [{ asset: 'customers/300/assets/-4' }],
+        logoImages: [{ asset: 'customers/300/assets/-5' }],
+      });
+      expect(operations.slice(6).map((operation: { campaignCriterionOperation: { create: unknown } }) => operation.campaignCriterionOperation.create)).toEqual([
+        { campaign: 'customers/300/campaigns/-2', location: { geoTargetConstant: 'geoTargetConstants/2076' } },
+        { campaign: 'customers/300/campaigns/-2', location: { geoTargetConstant: 'geoTargetConstants/2620' } },
+      ]);
+      expect(result).toEqual({ campaignId: '555', adSetId: '666', creativeId: null, adId: '777' });
+      expect(save).toHaveBeenCalledWith(result);
+    });
+
+    it('does nothing again once the campaign exists, the call is atomic', async () => {
+      const spy = jest.spyOn(global, 'fetch');
+
+      const result = await provider.boostPost(
+        'access',
+        account,
+        input,
+        { campaignId: '555', adSetId: '666', adId: '777' },
+        jest.fn()
+      );
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(result.campaignId).toBe('555');
+    });
+
+    it('needs the landing page and the texts Google shows with the video', async () => {
+      respondWithLogo(jest.spyOn(global, 'fetch'));
+
+      await expect(
+        provider.boostPost('access', account, { ...input, texts: null }, {}, jest.fn())
+      ).rejects.toBeInstanceOf(AdsApiError);
+      await expect(
+        provider.boostPost('access', account, { ...input, destinationUrl: null }, {}, jest.fn())
+      ).rejects.toBeInstanceOf(AdsApiError);
+    });
+
+    it('refuses a total budget and posts that are not YouTube videos', async () => {
+      respondWithLogo(jest.spyOn(global, 'fetch'));
+
+      await expect(
+        provider.boostPost('access', account, { ...input, budgetType: 'lifetime' }, {}, jest.fn())
+      ).rejects.toBeInstanceOf(AdsApiError);
+      await expect(
+        provider.boostPost(
+          'access',
+          account,
+          { ...input, reference: { type: 'meta-post', id: '1_2' } },
+          {},
+          jest.fn()
+        )
+      ).rejects.toBeInstanceOf(AdsApiError);
+    });
+  });
+
+  it('enables and pauses a campaign', async () => {
+    const spy = fetchReturning({ results: [] }, { results: [] });
+    const account = { externalId: '300', currency: 'BRL', loginCustomerId: '100' };
+
+    await provider.setCampaignStatus('access', account, '555', 'active');
+    await provider.setCampaignStatus('access', account, '555', 'paused');
+
+    expect(String(spy.mock.calls[0][0])).toBe(
+      'https://googleads.googleapis.com/v25/customers/300/campaigns:mutate'
+    );
+    expect(JSON.parse(sentBody(spy, 0))).toEqual({
+      operations: [
+        { update: { resourceName: 'customers/300/campaigns/555', status: 'ENABLED' }, updateMask: 'status' },
+      ],
+    });
+    expect(JSON.parse(sentBody(spy, 1)).operations[0].update.status).toBe('PAUSED');
+  });
+
+  it('changes the daily budget behind a campaign', async () => {
+    const spy = fetchReturning(
+      { results: [{ campaign: { campaignBudget: 'customers/300/campaignBudgets/1' } }] },
+      { results: [] }
+    );
+    const account = { externalId: '300', currency: 'BRL', loginCustomerId: '100' };
+
+    await provider.updateCampaignBudget('access', account, '555', 'daily', 7000);
+
+    expect(JSON.parse(sentBody(spy, 0)).query).toContain('campaign.id = 555');
+    expect(String(spy.mock.calls[1][0])).toBe(
+      'https://googleads.googleapis.com/v25/customers/300/campaignBudgets:mutate'
+    );
+    expect(JSON.parse(sentBody(spy, 1))).toEqual({
+      operations: [
+        { update: { resourceName: 'customers/300/campaignBudgets/1', amountMicros: '70000000' }, updateMask: 'amount_micros' },
+      ],
+    });
+  });
+
+  it('refuses campaign ids that are not numbers, they go inside the query', async () => {
+    const spy = jest.spyOn(global, 'fetch');
+
+    await expect(
+      provider.updateCampaignBudget(
+        'access',
+        { externalId: '300', currency: 'BRL' },
+        '1 OR 1=1',
+        'daily',
+        7000
+      )
+    ).rejects.toBeInstanceOf(AdsApiError);
+    expect(spy).not.toHaveBeenCalled();
+  });
 });
