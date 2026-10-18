@@ -1,8 +1,13 @@
+import { createHmac } from 'crypto';
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import { META_GRAPH_API_VERSION } from '@gitroom/nestjs-libraries/integrations/social/facebook.provider';
 import {
   AdsAccountDetails,
   AdsAccountReference,
+  AdsBoostInput,
+  AdsBoostObjective,
+  AdsBoostProgress,
+  AdsBudgetType,
   AdsCampaignDetails,
   AdsCampaignStatus,
   AdsDailyMetric,
@@ -39,6 +44,21 @@ const CURRENCIES_WITHOUT_CENTS = [
 const STATUS: Record<string, AdsCampaignStatus> = {
   ACTIVE: 'active',
   PAUSED: 'paused',
+};
+
+// Boosting keeps Meta's own pairing of objective and delivery goal
+const OBJECTIVES: Record<
+  AdsBoostObjective,
+  { objective: string; optimizationGoal: string }
+> = {
+  engagement: { objective: 'OUTCOME_ENGAGEMENT', optimizationGoal: 'POST_ENGAGEMENT' },
+  reach: { objective: 'OUTCOME_AWARENESS', optimizationGoal: 'REACH' },
+  traffic: { objective: 'OUTCOME_TRAFFIC', optimizationGoal: 'LINK_CLICKS' },
+};
+
+const BUDGET_FIELD: Record<AdsBudgetType, string> = {
+  daily: 'daily_budget',
+  lifetime: 'lifetime_budget',
 };
 
 interface GraphPage<T> {
@@ -86,10 +106,30 @@ const decimalToCents = (value = '0'): number => {
 const budgetToCents = (budget: string, currency: string): number =>
   Number(budget) * (CURRENCIES_WITHOUT_CENTS.includes(currency) ? 100 : 1);
 
+const centsToBudget = (cents: number, currency: string): string =>
+  String(
+    CURRENCIES_WITHOUT_CENTS.includes(currency) ? Math.round(cents / 100) : cents
+  );
+
 export class MetaAdsProvider implements AdsProvider {
   identifier = 'meta-ads';
   name = 'Meta Ads';
-  scopes = ['ads_read', 'business_management'];
+  scopes = [
+    'ads_read',
+    'ads_management',
+    'business_management',
+    'pages_show_list',
+    'pages_read_engagement',
+    'pages_manage_ads',
+    'instagram_basic',
+  ];
+  boost = {
+    promotes: ['meta-post', 'meta-instagram-media'],
+    objectives: ['engagement', 'reach'] as AdsBoostObjective[],
+    budgetTypes: ['daily', 'lifetime'] as AdsBudgetType[],
+    needsDestinationUrl: false,
+    needsTexts: false,
+  };
 
   isConfigured() {
     return !!process.env.FACEBOOK_APP_ID && !!process.env.FACEBOOK_APP_SECRET;
@@ -209,6 +249,116 @@ export class MetaAdsProvider implements AdsProvider {
     }));
   }
 
+  async boostPost(
+    accessToken: string,
+    account: AdsAccountReference,
+    input: AdsBoostInput,
+    progress: AdsBoostProgress,
+    save: (progress: AdsBoostProgress) => Promise<void>
+  ): Promise<AdsBoostProgress> {
+    const creative = this.creativeOf(input);
+    const goal = OBJECTIVES[input.objective];
+    const act = `${GRAPH_URL}/act_${account.externalId}`;
+    const done: AdsBoostProgress = { ...progress };
+
+    if (!done.campaignId) {
+      done.campaignId = (
+        await this.post<{ id: string }>(`${act}/campaigns`, accessToken, {
+          name: input.name,
+          objective: goal.objective,
+          status: 'PAUSED',
+          special_ad_categories: '[]',
+          bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+          [BUDGET_FIELD[input.budgetType]]: centsToBudget(input.budgetAmount, account.currency),
+        })
+      ).id;
+      await save({ ...done });
+    }
+
+    if (!done.adSetId) {
+      done.adSetId = (
+        await this.post<{ id: string }>(`${act}/adsets`, accessToken, {
+          name: input.name,
+          campaign_id: done.campaignId,
+          optimization_goal: goal.optimizationGoal,
+          billing_event: 'IMPRESSIONS',
+          start_time: input.startDate.toISOString(),
+          end_time: input.endDate.toISOString(),
+          status: 'ACTIVE',
+          targeting: JSON.stringify({
+            geo_locations: { countries: input.audience.countries },
+            age_min: input.audience.ageMin,
+            age_max: input.audience.ageMax,
+            targeting_automation: { advantage_audience: 0 },
+          }),
+        })
+      ).id;
+      await save({ ...done });
+    }
+
+    if (!done.creativeId) {
+      done.creativeId = (
+        await this.post<{ id: string }>(`${act}/adcreatives`, accessToken, {
+          name: input.name,
+          ...creative,
+        })
+      ).id;
+      await save({ ...done });
+    }
+
+    if (!done.adId) {
+      done.adId = (
+        await this.post<{ id: string }>(`${act}/ads`, accessToken, {
+          name: input.name,
+          adset_id: done.adSetId,
+          creative: JSON.stringify({ creative_id: done.creativeId }),
+          status: 'ACTIVE',
+        })
+      ).id;
+      await save({ ...done });
+    }
+
+    return done;
+  }
+
+  async setCampaignStatus(
+    accessToken: string,
+    account: AdsAccountReference,
+    campaignExternalId: string,
+    status: 'active' | 'paused'
+  ): Promise<void> {
+    await this.post(`${GRAPH_URL}/${campaignExternalId}`, accessToken, {
+      status: status === 'active' ? 'ACTIVE' : 'PAUSED',
+    });
+  }
+
+  async updateCampaignBudget(
+    accessToken: string,
+    account: AdsAccountReference,
+    campaignExternalId: string,
+    budgetType: AdsBudgetType,
+    amount: number
+  ): Promise<void> {
+    await this.post(`${GRAPH_URL}/${campaignExternalId}`, accessToken, {
+      [BUDGET_FIELD[budgetType]]: centsToBudget(amount, account.currency),
+    });
+  }
+
+  private creativeOf(input: AdsBoostInput): Record<string, string> {
+    const { reference } = input;
+    if (reference.type === 'meta-post') {
+      return { object_story_id: reference.id };
+    }
+    if (reference.type === 'meta-instagram-media' && reference.pageId && reference.instagramUserId) {
+      return {
+        object_id: reference.pageId,
+        instagram_user_id: reference.instagramUserId,
+        source_instagram_media_id: reference.id,
+      };
+    }
+    throw new AdsApiError('Meta Ads cannot promote this post');
+  }
+
   private async paginate<T>(first: URL, accessToken: string): Promise<T[]> {
     const items: T[] = [];
     let next: string | undefined = first.toString();
@@ -223,8 +373,37 @@ export class MetaAdsProvider implements AdsProvider {
     return items;
   }
 
-  private async request<T>(url: URL, accessToken?: string): Promise<T> {
+  private async post<T>(
+    address: string,
+    accessToken: string,
+    fields: Record<string, string | undefined>
+  ): Promise<T> {
+    const body = new URLSearchParams();
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined) {
+        body.set(key, value);
+      }
+    }
+    return this.request<T>(new URL(address), accessToken, { method: 'POST', body });
+  }
+
+  // Meta asks server calls to prove they hold the app secret along with the token
+  private proof(accessToken: string) {
+    return createHmac('sha256', process.env.FACEBOOK_APP_SECRET || '')
+      .update(accessToken)
+      .digest('hex');
+  }
+
+  private async request<T>(
+    url: URL,
+    accessToken?: string,
+    init: { method?: string; body?: URLSearchParams } = {}
+  ): Promise<T> {
+    if (accessToken) {
+      url.searchParams.set('appsecret_proof', this.proof(accessToken));
+    }
     const response = await fetch(url, {
+      ...init,
       headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
     });
     const body = (await response.json()) as T & GraphError;
