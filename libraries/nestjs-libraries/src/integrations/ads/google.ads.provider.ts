@@ -2,6 +2,10 @@ import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id'
 import {
   AdsAccountDetails,
   AdsAccountReference,
+  AdsBoostInput,
+  AdsBoostObjective,
+  AdsBoostProgress,
+  AdsBudgetType,
   AdsCampaignDetails,
   AdsCampaignStatus,
   AdsDailyMetric,
@@ -19,6 +23,8 @@ const API_URL = `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}`;
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_TOKEN_LIFETIME = 3600;
+const NUMERIC_ID = /^\d+$/;
+const COUNTRY_CODE = /^[A-Z]{2}$/;
 
 const STATUS: Record<string, AdsCampaignStatus> = {
   ENABLED: 'active',
@@ -72,12 +78,38 @@ interface MetricRow {
   };
 }
 
+interface MutateResponse {
+  mutateOperationResponses?: Record<string, { resourceName: string }>[];
+}
+
+interface GeoTargetRow {
+  geoTargetConstant: { resourceName: string };
+}
+
+interface CampaignBudgetRow {
+  campaign: { campaignBudget: string };
+}
+
 const microsToCents = (micros = '0'): number => Math.round(Number(micros) / 10000);
+
+const centsToMicros = (cents: number): string => String(cents * 10000);
+
+const lastId = (resourceName = ''): string | null =>
+  resourceName.split(/[/~]/).pop() || null;
+
+const day = (date: Date): string => date.toISOString().slice(0, 10);
 
 export class GoogleAdsProvider implements AdsProvider {
   identifier = 'google-ads';
   name = 'Google Ads';
   scopes = ['https://www.googleapis.com/auth/adwords'];
+  boost = {
+    promotes: ['youtube-video'],
+    objectives: ['traffic'] as AdsBoostObjective[],
+    budgetTypes: ['daily'] as AdsBudgetType[],
+    needsDestinationUrl: true,
+    needsTexts: true,
+  };
 
   isConfigured() {
     return (
@@ -212,6 +244,236 @@ export class GoogleAdsProvider implements AdsProvider {
       spend: microsToCents(metrics.costMicros),
       conversions: metrics.conversions || 0,
     }));
+  }
+
+  // Google has no boost of an organic post: a published YouTube video is
+  // promoted by a Demand Gen campaign, created paused in a single atomic call
+  async boostPost(
+    accessToken: string,
+    account: AdsAccountReference,
+    input: AdsBoostInput,
+    progress: AdsBoostProgress,
+    save: (progress: AdsBoostProgress) => Promise<void>
+  ): Promise<AdsBoostProgress> {
+    if (progress.campaignId) {
+      return progress;
+    }
+    if (input.reference.type !== 'youtube-video') {
+      throw new AdsApiError('Google Ads can only promote YouTube videos');
+    }
+    if (input.budgetType !== 'daily') {
+      throw new AdsApiError('Google Ads promotes videos with a daily budget');
+    }
+    if (!input.destinationUrl || !input.texts) {
+      throw new AdsApiError('Google Ads needs a landing page and the ad texts');
+    }
+    if (!input.reference.logoUrl) {
+      throw new AdsApiError('Google Ads needs the channel picture as the logo');
+    }
+
+    const logo = await this.download(input.reference.logoUrl);
+    const locations = await this.countries(accessToken, account, input.audience.countries);
+
+    const customer = `customers/${account.externalId}`;
+    const budget = `${customer}/campaignBudgets/-1`;
+    const campaign = `${customer}/campaigns/-2`;
+    const adGroup = `${customer}/adGroups/-3`;
+    const video = `${customer}/assets/-4`;
+    const logoAsset = `${customer}/assets/-5`;
+
+    const { mutateOperationResponses = [] } = await this.request<MutateResponse>(
+      `${API_URL}/${customer}/googleAds:mutate`,
+      accessToken,
+      {
+        loginCustomerId: account.loginCustomerId,
+        body: {
+          mutateOperations: [
+            {
+              campaignBudgetOperation: {
+                create: {
+                  resourceName: budget,
+                  name: input.name,
+                  amountMicros: centsToMicros(input.budgetAmount),
+                  deliveryMethod: 'STANDARD',
+                  explicitlyShared: false,
+                },
+              },
+            },
+            {
+              campaignOperation: {
+                create: {
+                  resourceName: campaign,
+                  name: input.name,
+                  status: 'PAUSED',
+                  advertisingChannelType: 'DEMAND_GEN',
+                  campaignBudget: budget,
+                  targetSpend: {},
+                  startDateTime: `${day(input.startDate)} 00:00:00`,
+                  endDateTime: `${day(input.endDate)} 23:59:59`,
+                  containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
+                },
+              },
+            },
+            {
+              adGroupOperation: {
+                create: { resourceName: adGroup, campaign, name: input.name, status: 'ENABLED' },
+              },
+            },
+            {
+              assetOperation: {
+                create: {
+                  resourceName: video,
+                  name: `${input.name} - video`,
+                  youtubeVideoAsset: { youtubeVideoId: input.reference.id },
+                },
+              },
+            },
+            {
+              assetOperation: {
+                create: {
+                  resourceName: logoAsset,
+                  name: `${input.name} - logo`,
+                  imageAsset: { data: logo },
+                },
+              },
+            },
+            {
+              adGroupAdOperation: {
+                create: {
+                  adGroup,
+                  status: 'ENABLED',
+                  ad: {
+                    name: input.name,
+                    finalUrls: [input.destinationUrl],
+                    demandGenVideoResponsiveAd: {
+                      headlines: [{ text: input.texts.headline }],
+                      longHeadlines: [{ text: input.texts.longHeadline }],
+                      descriptions: [{ text: input.texts.description }],
+                      businessName: { text: input.texts.businessName },
+                      videos: [{ asset: video }],
+                      logoImages: [{ asset: logoAsset }],
+                    },
+                  },
+                },
+              },
+            },
+            ...locations.map((geoTargetConstant) => ({
+              campaignCriterionOperation: {
+                create: { campaign, location: { geoTargetConstant } },
+              },
+            })),
+          ],
+        },
+      }
+    );
+
+    const created: AdsBoostProgress = {
+      campaignId: lastId(mutateOperationResponses[1]?.campaignResult?.resourceName),
+      adSetId: lastId(mutateOperationResponses[2]?.adGroupResult?.resourceName),
+      creativeId: null,
+      adId: lastId(mutateOperationResponses[5]?.adGroupAdResult?.resourceName),
+    };
+    await save(created);
+    return created;
+  }
+
+  async setCampaignStatus(
+    accessToken: string,
+    account: AdsAccountReference,
+    campaignExternalId: string,
+    status: 'active' | 'paused'
+  ): Promise<void> {
+    if (!NUMERIC_ID.test(campaignExternalId)) {
+      throw new AdsApiError('Unknown Google Ads campaign');
+    }
+    await this.request(
+      `${API_URL}/customers/${account.externalId}/campaigns:mutate`,
+      accessToken,
+      {
+        loginCustomerId: account.loginCustomerId,
+        body: {
+          operations: [
+            {
+              update: {
+                resourceName: `customers/${account.externalId}/campaigns/${campaignExternalId}`,
+                status: status === 'active' ? 'ENABLED' : 'PAUSED',
+              },
+              updateMask: 'status',
+            },
+          ],
+        },
+      }
+    );
+  }
+
+  async updateCampaignBudget(
+    accessToken: string,
+    account: AdsAccountReference,
+    campaignExternalId: string,
+    budgetType: AdsBudgetType,
+    amount: number
+  ): Promise<void> {
+    if (!NUMERIC_ID.test(campaignExternalId)) {
+      throw new AdsApiError('Unknown Google Ads campaign');
+    }
+    if (budgetType !== 'daily') {
+      throw new AdsApiError('Only daily budgets can be changed on Google Ads');
+    }
+    const [row] = await this.search<CampaignBudgetRow>(
+      accessToken,
+      account,
+      `SELECT campaign.campaign_budget FROM campaign WHERE campaign.id = ${campaignExternalId}`
+    );
+    if (!row?.campaign?.campaignBudget) {
+      throw new AdsApiError('This campaign has no budget of its own');
+    }
+    await this.request(
+      `${API_URL}/customers/${account.externalId}/campaignBudgets:mutate`,
+      accessToken,
+      {
+        loginCustomerId: account.loginCustomerId,
+        body: {
+          operations: [
+            {
+              update: {
+                resourceName: row.campaign.campaignBudget,
+                amountMicros: centsToMicros(amount),
+              },
+              updateMask: 'amount_micros',
+            },
+          ],
+        },
+      }
+    );
+  }
+
+  private async countries(
+    accessToken: string,
+    account: AdsAccountReference,
+    codes: string[]
+  ): Promise<string[]> {
+    if (!codes.length) {
+      return [];
+    }
+    if (!codes.every((code) => COUNTRY_CODE.test(code))) {
+      throw new AdsApiError('Countries must be two letter codes');
+    }
+    const rows = await this.search<GeoTargetRow>(
+      accessToken,
+      account,
+      `SELECT geo_target_constant.resource_name FROM geo_target_constant WHERE geo_target_constant.country_code IN (${codes
+        .map((code) => `'${code}'`)
+        .join(', ')}) AND geo_target_constant.target_type = 'Country'`
+    );
+    return rows.map((row) => row.geoTargetConstant.resourceName);
+  }
+
+  private async download(url: string): Promise<string> {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new AdsApiError('The channel picture could not be downloaded');
+    }
+    return Buffer.from(await response.arrayBuffer()).toString('base64');
   }
 
   private async search<T>(
