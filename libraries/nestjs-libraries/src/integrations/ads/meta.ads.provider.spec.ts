@@ -1,3 +1,4 @@
+import { createHmac } from 'crypto';
 import { MetaAdsProvider } from '@gitroom/nestjs-libraries/integrations/ads/meta.ads.provider';
 import {
   AdsApiError,
@@ -21,6 +22,22 @@ const fetchReturning = (...bodies: unknown[]) => {
 const requestedUrl = (spy: jest.SpyInstance, call: number) =>
   new URL(String(spy.mock.calls[call][0]));
 
+const sentForm = (spy: jest.SpyInstance, call: number) =>
+  new URLSearchParams(String(spy.mock.calls[call][1]?.body));
+
+const account = { externalId: '111', currency: 'BRL', loginCustomerId: null };
+
+const boost = {
+  name: 'Impulsionar: Lançamento',
+  reference: { type: 'meta-post', id: '900_800' },
+  objective: 'engagement' as const,
+  budgetType: 'daily' as const,
+  budgetAmount: 5000,
+  startDate: new Date('2026-10-18T12:00:00Z'),
+  endDate: new Date('2026-10-25T12:00:00Z'),
+  audience: { countries: ['BR'], ageMin: 18, ageMax: 45 },
+};
+
 describe('MetaAdsProvider', () => {
   const provider = new MetaAdsProvider();
 
@@ -40,7 +57,7 @@ describe('MetaAdsProvider', () => {
     expect(provider.isConfigured()).toBe(false);
   });
 
-  it('asks only for the ads read scopes and returns to the ads callback', async () => {
+  it('asks for the scopes to read and create ads from page posts and returns to the ads callback', async () => {
     const { url, state } = await provider.generateAuthUrl();
     const parsed = new URL(url);
 
@@ -48,7 +65,9 @@ describe('MetaAdsProvider', () => {
       'https://www.facebook.com/v25.0/dialog/oauth'
     );
     expect(parsed.searchParams.get('client_id')).toBe('app-id');
-    expect(parsed.searchParams.get('scope')).toBe('ads_read,business_management');
+    expect(parsed.searchParams.get('scope')).toBe(
+      'ads_read,ads_management,business_management,pages_show_list,pages_read_engagement,pages_manage_ads,instagram_basic'
+    );
     expect(parsed.searchParams.get('redirect_uri')).toBe(
       'https://pauta.example/ads/connect/meta-ads'
     );
@@ -232,5 +251,163 @@ describe('MetaAdsProvider', () => {
     await expect(provider.listAdAccounts('token')).rejects.toBeInstanceOf(
       AdsReconnectRequiredError
     );
+  });
+
+  it('proves every call with the app secret, as Meta requires for server calls', async () => {
+    const spy = fetchReturning({ data: [] });
+
+    await provider.listAdAccounts('secret-token');
+
+    expect(requestedUrl(spy, 0).searchParams.get('appsecret_proof')).toBe(
+      createHmac('sha256', 'app-secret').update('secret-token').digest('hex')
+    );
+  });
+
+  describe('boosting a post', () => {
+    it('creates the campaign paused and the ad set, creative and ad under it', async () => {
+      const spy = fetchReturning({ id: 'c1' }, { id: 's1' }, { id: 'cr1' }, { id: 'a1' });
+      const save = jest.fn();
+
+      const result = await provider.boostPost('token', account, boost, {}, save);
+
+      expect(requestedUrl(spy, 0).pathname).toBe('/v25.0/act_111/campaigns');
+      expect(spy.mock.calls[0][1]?.method).toBe('POST');
+      const campaign = sentForm(spy, 0);
+      expect(campaign.get('status')).toBe('PAUSED');
+      expect(campaign.get('objective')).toBe('OUTCOME_ENGAGEMENT');
+      expect(campaign.get('daily_budget')).toBe('5000');
+      expect(campaign.get('bid_strategy')).toBe('LOWEST_COST_WITHOUT_CAP');
+      expect(campaign.get('special_ad_categories')).toBe('[]');
+      expect(campaign.get('name')).toBe('Impulsionar: Lançamento');
+
+      expect(requestedUrl(spy, 1).pathname).toBe('/v25.0/act_111/adsets');
+      const adSet = sentForm(spy, 1);
+      expect(adSet.get('campaign_id')).toBe('c1');
+      expect(adSet.get('optimization_goal')).toBe('POST_ENGAGEMENT');
+      expect(adSet.get('billing_event')).toBe('IMPRESSIONS');
+      expect(adSet.get('start_time')).toBe('2026-10-18T12:00:00.000Z');
+      expect(adSet.get('end_time')).toBe('2026-10-25T12:00:00.000Z');
+      expect(JSON.parse(adSet.get('targeting') || '')).toEqual({
+        geo_locations: { countries: ['BR'] },
+        age_min: 18,
+        age_max: 45,
+        targeting_automation: { advantage_audience: 0 },
+      });
+
+      expect(requestedUrl(spy, 2).pathname).toBe('/v25.0/act_111/adcreatives');
+      expect(sentForm(spy, 2).get('object_story_id')).toBe('900_800');
+
+      expect(requestedUrl(spy, 3).pathname).toBe('/v25.0/act_111/ads');
+      const ad = sentForm(spy, 3);
+      expect(ad.get('adset_id')).toBe('s1');
+      expect(JSON.parse(ad.get('creative') || '')).toEqual({ creative_id: 'cr1' });
+
+      expect(result).toEqual({ campaignId: 'c1', adSetId: 's1', creativeId: 'cr1', adId: 'a1' });
+      expect(save).toHaveBeenNthCalledWith(1, { campaignId: 'c1' });
+      expect(save).toHaveBeenLastCalledWith(result);
+    });
+
+    it('continues after the last step a previous attempt saved', async () => {
+      const spy = fetchReturning({ id: 'cr1' }, { id: 'a1' });
+
+      const result = await provider.boostPost(
+        'token',
+        account,
+        boost,
+        { campaignId: 'c1', adSetId: 's1' },
+        jest.fn()
+      );
+
+      expect(spy).toHaveBeenCalledTimes(2);
+      expect(requestedUrl(spy, 0).pathname).toBe('/v25.0/act_111/adcreatives');
+      expect(result.adId).toBe('a1');
+    });
+
+    it('promotes an Instagram media through the page linked to the account', async () => {
+      const spy = fetchReturning({ id: 'c1' }, { id: 's1' }, { id: 'cr1' }, { id: 'a1' });
+
+      await provider.boostPost(
+        'token',
+        account,
+        {
+          ...boost,
+          reference: { type: 'meta-instagram-media', id: 'm1', pageId: '900', instagramUserId: 'ig1' },
+        },
+        {},
+        jest.fn()
+      );
+
+      const creative = sentForm(spy, 2);
+      expect(creative.get('object_id')).toBe('900');
+      expect(creative.get('instagram_user_id')).toBe('ig1');
+      expect(creative.get('source_instagram_media_id')).toBe('m1');
+    });
+
+    it('optimizes for reach with a total budget', async () => {
+      const spy = fetchReturning({ id: 'c1' }, { id: 's1' }, { id: 'cr1' }, { id: 'a1' });
+
+      await provider.boostPost(
+        'token',
+        account,
+        { ...boost, objective: 'reach', budgetType: 'lifetime', budgetAmount: 30000 },
+        {},
+        jest.fn()
+      );
+
+      expect(sentForm(spy, 0).get('objective')).toBe('OUTCOME_AWARENESS');
+      expect(sentForm(spy, 0).get('lifetime_budget')).toBe('30000');
+      expect(sentForm(spy, 0).get('daily_budget')).toBeNull();
+      expect(sentForm(spy, 1).get('optimization_goal')).toBe('REACH');
+    });
+
+    it('sends budgets of currencies without cents in whole units', async () => {
+      const spy = fetchReturning({ id: 'c1' }, { id: 's1' }, { id: 'cr1' }, { id: 'a1' });
+
+      await provider.boostPost(
+        'token',
+        { ...account, currency: 'JPY' },
+        { ...boost, budgetAmount: 150000 },
+        {},
+        jest.fn()
+      );
+
+      expect(sentForm(spy, 0).get('daily_budget')).toBe('1500');
+    });
+
+    it('refuses a post it does not know how to promote', async () => {
+      const spy = jest.spyOn(global, 'fetch');
+
+      await expect(
+        provider.boostPost(
+          'token',
+          account,
+          { ...boost, reference: { type: 'youtube-video', id: 'v1' } },
+          {},
+          jest.fn()
+        )
+      ).rejects.toBeInstanceOf(AdsApiError);
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('activates and pauses a campaign', async () => {
+    const spy = fetchReturning({ success: true }, { success: true });
+
+    await provider.setCampaignStatus('token', account, 'c1', 'active');
+    await provider.setCampaignStatus('token', account, 'c1', 'paused');
+
+    expect(requestedUrl(spy, 0).pathname).toBe('/v25.0/c1');
+    expect(sentForm(spy, 0).get('status')).toBe('ACTIVE');
+    expect(sentForm(spy, 1).get('status')).toBe('PAUSED');
+  });
+
+  it('changes the budget of a campaign in the currency unit Meta expects', async () => {
+    const spy = fetchReturning({ success: true }, { success: true });
+
+    await provider.updateCampaignBudget('token', account, 'c1', 'daily', 7000);
+    await provider.updateCampaignBudget('token', { ...account, currency: 'JPY' }, 'c1', 'lifetime', 90000);
+
+    expect(sentForm(spy, 0).get('daily_budget')).toBe('7000');
+    expect(sentForm(spy, 1).get('lifetime_budget')).toBe('900');
   });
 });
