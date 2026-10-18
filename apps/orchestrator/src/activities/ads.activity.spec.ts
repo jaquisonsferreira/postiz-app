@@ -65,7 +65,7 @@ describe('AdsActivity', () => {
   });
 
   it('marca o impulsionamento como falho com o motivo', async () => {
-    const fail = jest.fn(async () => ({}));
+    const fail = jest.fn(async () => undefined);
     await activityWith({}, { fail }).failBoost({ boostId: 'boost-1', error: 'Sem saldo' });
     expect(fail).toHaveBeenCalledWith('boost-1', 'Sem saldo');
   });

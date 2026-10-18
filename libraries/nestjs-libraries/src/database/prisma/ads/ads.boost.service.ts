@@ -208,8 +208,8 @@ export class AdsBoostService {
     await this._boostRepository.updateBoost(id, { status: 'active', error: null });
   }
 
-  fail(id: string, error: string) {
-    return this._boostRepository.updateBoost(id, { status: 'failed', error });
+  async fail(id: string, error: string) {
+    await this._boostRepository.updateBoost(id, { status: 'failed', error });
   }
 
   async autoBoost() {
