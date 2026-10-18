@@ -6,6 +6,7 @@ import { AdsRepository } from '@gitroom/nestjs-libraries/database/prisma/ads/ads
 import { AdsManager } from '@gitroom/nestjs-libraries/integrations/ads/ads.manager';
 import { AdsProvider } from '@gitroom/nestjs-libraries/integrations/ads/ads.interface';
 import { AdsReconnectRequiredError } from '@gitroom/nestjs-libraries/integrations/ads/ads.errors';
+import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
 
 process.env.JWT_SECRET = 'segredo-de-teste';
 
@@ -27,12 +28,17 @@ const fakeProvider = (overrides: Partial<AdsProvider> = {}): AdsProvider => ({
     { campaignExternalId: 'c1', campaignName: 'Black Friday', date: '2026-10-16', impressions: 100, reach: 90, clicks: 4, spend: 1234, conversions: 1 },
     { campaignExternalId: 'c9', campaignName: 'Apagada', date: '2026-10-16', impressions: 10, reach: 9, clicks: 1, spend: 100, conversions: 0 },
   ],
+  boost: { promotes: ['meta-post'], objectives: ['engagement'], budgetTypes: ['daily'], needsDestinationUrl: false, needsTexts: false },
+  boostPost: async () => ({ campaignId: 'c1' }),
+  setCampaignStatus: async () => undefined,
+  updateCampaignBudget: async () => undefined,
   ...overrides,
 });
 
 const serviceWith = (
   repository: Record<string, unknown>,
-  provider: AdsProvider = fakeProvider()
+  provider: AdsProvider = fakeProvider(),
+  notifications: Record<string, unknown> = { inAppNotification: jest.fn() }
 ) =>
   new AdsService(
     repository as unknown as AdsRepository,
@@ -40,7 +46,8 @@ const serviceWith = (
       getProvider: (identifier: string) =>
         identifier === provider.identifier ? provider : undefined,
       getAllProviders: () => [],
-    } as unknown as AdsManager
+    } as unknown as AdsManager,
+    notifications as unknown as NotificationService
   );
 
 const storedAccount = (overrides: Record<string, unknown> = {}) => ({
@@ -381,6 +388,218 @@ describe('AdsService', () => {
         { id: 'c1', name: 'Black Friday', status: 'active', provider: 'meta-ads', accountName: 'Loja', currency: 'BRL', budgetType: 'daily', budgetAmount: 5000, spend: 5000, impressions: 2000, clicks: 50, conversions: 3 },
         { id: 'c3', name: 'Nova York', status: 'active', provider: 'meta-ads', accountName: 'Clínica', currency: 'USD', budgetType: 'daily', budgetAmount: 1000, spend: 0, impressions: 0, clicks: 0, conversions: 0 },
       ]);
+    });
+  });
+
+  describe('acting on a campaign', () => {
+    const storedCampaign = (overrides: Record<string, unknown> = {}) => ({
+      id: 'campanha',
+      externalId: 'c1',
+      status: 'active',
+      budgetType: 'daily',
+      adAccount: storedAccount(),
+      ...overrides,
+    });
+
+    it('pauses and resumes the campaign on the platform and keeps the new status', async () => {
+      const setCampaignStatus = jest.fn(async () => undefined);
+      const repository = {
+        getCampaign: jest.fn(async () => storedCampaign()),
+        updateCampaign: jest.fn(async () => ({ id: 'campanha', status: 'paused' })),
+      };
+      const service = serviceWith(repository, fakeProvider({ setCampaignStatus }));
+
+      await service.setCampaignStatus('org', 'campanha', 'paused');
+
+      expect(repository.getCampaign).toHaveBeenCalledWith('org', 'campanha');
+      expect(setCampaignStatus).toHaveBeenCalledWith(
+        'acesso',
+        { externalId: '111', currency: 'BRL', loginCustomerId: null },
+        'c1',
+        'paused'
+      );
+      expect(repository.updateCampaign).toHaveBeenCalledWith('campanha', { status: 'paused' });
+    });
+
+    it('changes the budget in the same kind the campaign already has', async () => {
+      const updateCampaignBudget = jest.fn(async () => undefined);
+      const repository = {
+        getCampaign: jest.fn(async () => storedCampaign({ budgetType: 'lifetime' })),
+        updateCampaign: jest.fn(async () => ({ id: 'campanha' })),
+      };
+      const service = serviceWith(repository, fakeProvider({ updateCampaignBudget }));
+
+      await service.updateCampaignBudget('org', 'campanha', 9000);
+
+      expect(updateCampaignBudget).toHaveBeenCalledWith(
+        'acesso',
+        { externalId: '111', currency: 'BRL', loginCustomerId: null },
+        'c1',
+        'lifetime',
+        9000
+      );
+      expect(repository.updateCampaign).toHaveBeenCalledWith('campanha', { budgetAmount: 9000 });
+    });
+
+    it('refuses campaigns of another organization, removed ones and ones without a budget', async () => {
+      const missing = serviceWith({ getCampaign: jest.fn(async () => null) });
+      await expect(missing.setCampaignStatus('org', 'campanha', 'paused')).rejects.toEqual(
+        new HttpException('Campaign not found', 404)
+      );
+
+      const removed = serviceWith({ getCampaign: jest.fn(async () => storedCampaign({ status: 'removed' })) });
+      await expect(removed.setCampaignStatus('org', 'campanha', 'active')).rejects.toEqual(
+        new HttpException('This campaign was removed on the platform', 400)
+      );
+
+      const noBudget = serviceWith({ getCampaign: jest.fn(async () => storedCampaign({ budgetType: null })) });
+      await expect(noBudget.updateCampaignBudget('org', 'campanha', 100)).rejects.toEqual(
+        new HttpException('This campaign has no budget of its own', 400)
+      );
+    });
+
+    it('shows the platform message and asks for a new login when the token was revoked', async () => {
+      const repository = {
+        getCampaign: jest.fn(async () => storedCampaign()),
+        updateCampaign: jest.fn(),
+        markRefreshNeeded: jest.fn(),
+      };
+      const service = serviceWith(
+        repository,
+        fakeProvider({
+          setCampaignStatus: async () => {
+            throw new AdsReconnectRequiredError();
+          },
+        })
+      );
+
+      await expect(service.setCampaignStatus('org', 'campanha', 'paused')).rejects.toEqual(
+        new HttpException('Connect the ad account again', 400)
+      );
+      expect(repository.markRefreshNeeded).toHaveBeenCalledWith('conta');
+      expect(repository.updateCampaign).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('monthly budget', () => {
+    it('shows the spend of the month next to the rule of each account', async () => {
+      const repository = {
+        listAccountsWithRules: jest.fn(async () => [
+          { id: 'conta', provider: 'meta-ads', name: 'Loja', currency: 'BRL', budgetRule: { monthlyCap: 100000, approvalThreshold: 20000, alertAt: 80 } },
+          { id: 'outra', provider: 'google-ads', name: 'Clínica', currency: 'USD', budgetRule: null },
+        ]),
+        spendSince: jest.fn(async (accountId: string) => (accountId === 'conta' ? 45000 : 1200)),
+      };
+      const service = serviceWith(repository);
+
+      expect(await service.budget('org')).toEqual([
+        { accountId: 'conta', provider: 'meta-ads', name: 'Loja', currency: 'BRL', monthSpend: 45000, rule: { monthlyCap: 100000, approvalThreshold: 20000, alertAt: 80 } },
+        { accountId: 'outra', provider: 'google-ads', name: 'Clínica', currency: 'USD', monthSpend: 1200, rule: null },
+      ]);
+      expect(repository.spendSince).toHaveBeenCalledWith('conta', new Date('2026-10-01T00:00:00Z'));
+    });
+
+    it('saves and removes the rule only for an account of the organization', async () => {
+      const repository = {
+        getAccount: jest.fn(async (org: string) => (org === 'org' ? storedAccount() : null)),
+        upsertRule: jest.fn(async () => ({ id: 'regra' })),
+        deleteRule: jest.fn(),
+      };
+      const service = serviceWith(repository);
+      const rule = { monthlyCap: 100000, approvalThreshold: null, alertAt: 80 };
+
+      await service.saveRule('org', 'conta', rule);
+      await service.deleteRule('org', 'conta');
+
+      expect(repository.upsertRule).toHaveBeenCalledWith('conta', rule);
+      expect(repository.deleteRule).toHaveBeenCalledWith('conta');
+      await expect(service.saveRule('outra-org', 'conta', rule)).rejects.toEqual(
+        new HttpException('Ad account not found', 404)
+      );
+    });
+
+    const guardRepository = (rule: Record<string, unknown>, spend: number) => ({
+      rulesToGuard: jest.fn(async () => [
+        {
+          id: 'regra',
+          monthlyCap: 100000,
+          alertAt: 80,
+          alertedMonth: null,
+          cappedMonth: null,
+          ...rule,
+          adAccount: { ...storedAccount(), name: 'Loja' },
+        },
+      ]),
+      spendSince: jest.fn(async () => spend),
+      activeCampaigns: jest.fn(async () => [
+        { id: 'campanha-1', externalId: 'c1' },
+        { id: 'campanha-2', externalId: 'c2' },
+      ]),
+      updateCampaign: jest.fn(),
+      updateRule: jest.fn(),
+      markRefreshNeeded: jest.fn(),
+    });
+
+    it('pauses every active campaign of the account once the month reaches the cap', async () => {
+      const setCampaignStatus = jest.fn(async () => undefined);
+      const notifications = { inAppNotification: jest.fn() };
+      const repository = guardRepository({}, 100000);
+      const service = serviceWith(repository, fakeProvider({ setCampaignStatus }), notifications);
+
+      expect(await service.guardBudgets()).toEqual({ capped: 1, alerted: 0 });
+
+      expect(setCampaignStatus).toHaveBeenCalledTimes(2);
+      expect(setCampaignStatus).toHaveBeenCalledWith('acesso', expect.anything(), 'c2', 'paused');
+      expect(repository.updateCampaign).toHaveBeenCalledWith('campanha-1', { status: 'paused' });
+      expect(repository.updateRule).toHaveBeenCalledWith('regra', { cappedMonth: '2026-10', alertedMonth: '2026-10' });
+      expect(notifications.inAppNotification).toHaveBeenCalledWith(
+        'org',
+        'Loja reached its monthly ad budget',
+        expect.stringContaining('paused 2 campaigns'),
+        true,
+        false,
+        'fail'
+      );
+    });
+
+    it('warns once when the month passes the alert level', async () => {
+      const notifications = { inAppNotification: jest.fn() };
+      const repository = guardRepository({}, 85000);
+      const service = serviceWith(repository, fakeProvider(), notifications);
+
+      expect(await service.guardBudgets()).toEqual({ capped: 0, alerted: 1 });
+      expect(repository.activeCampaigns).not.toHaveBeenCalled();
+      expect(repository.updateRule).toHaveBeenCalledWith('regra', { alertedMonth: '2026-10' });
+      expect(notifications.inAppNotification).toHaveBeenCalledWith(
+        'org',
+        'Loja used 85% of its monthly ad budget',
+        expect.any(String),
+        true,
+        false,
+        'info'
+      );
+    });
+
+    it('does not repeat what it already did this month', async () => {
+      const notifications = { inAppNotification: jest.fn() };
+      const repository = guardRepository({ alertedMonth: '2026-10', cappedMonth: '2026-10' }, 150000);
+      const service = serviceWith(repository, fakeProvider(), notifications);
+
+      expect(await service.guardBudgets()).toEqual({ capped: 0, alerted: 0 });
+      expect(notifications.inAppNotification).not.toHaveBeenCalled();
+    });
+
+    it('keeps pausing the other campaigns when one fails on the platform', async () => {
+      const setCampaignStatus = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('Meta is down'))
+        .mockResolvedValueOnce(undefined);
+      const repository = guardRepository({}, 120000);
+      const service = serviceWith(repository, fakeProvider({ setCampaignStatus }));
+
+      expect(await service.guardBudgets()).toEqual({ capped: 1, alerted: 0 });
+      expect(repository.updateCampaign).toHaveBeenCalledTimes(1);
+      expect(repository.updateCampaign).toHaveBeenCalledWith('campanha-2', { status: 'paused' });
     });
   });
 });
