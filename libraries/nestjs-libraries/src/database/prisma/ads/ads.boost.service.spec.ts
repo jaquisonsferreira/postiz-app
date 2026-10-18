@@ -449,4 +449,52 @@ describe('AdsBoostService', () => {
       );
     });
   });
+
+  describe('saveAutoBoost', () => {
+    const rule = { ...request, postId: undefined, integrationId: 'canal' };
+
+    it('saves the automatic boost of a channel whose posts can be promoted', async () => {
+      const upsertAutoBoost = jest.fn(async () => ({ id: 'regra' }));
+      const { service } = setup({
+        boosts: {
+          getIntegration: jest.fn(async () => ({ id: 'canal', providerIdentifier: 'facebook' })),
+          upsertAutoBoost,
+        },
+      });
+
+      await service.saveAutoBoost('org', rule);
+
+      expect(upsertAutoBoost).toHaveBeenCalledWith('org', {
+        integrationId: 'canal',
+        adAccountId: 'conta',
+        objective: 'engagement',
+        budgetType: 'daily',
+        budgetAmount: 2000,
+        days: 7,
+        audience: JSON.stringify(request.audience),
+        destinationUrl: null,
+        texts: null,
+      });
+    });
+
+    it('refuses a channel of another organization', async () => {
+      const { service } = setup({ boosts: { getIntegration: jest.fn(async () => null) } });
+
+      await expect(service.saveAutoBoost('org', rule)).rejects.toThrow(
+        new HttpException('Channel not found', 404)
+      );
+    });
+
+    it('refuses a channel whose posts cannot be promoted', async () => {
+      const { service } = setup({
+        boosts: {
+          getIntegration: jest.fn(async () => ({ id: 'canal', providerIdentifier: 'x' })),
+        },
+      });
+
+      await expect(service.saveAutoBoost('org', rule)).rejects.toThrow(
+        new HttpException('Posts of this channel cannot be promoted', 400)
+      );
+    });
+  });
 });
