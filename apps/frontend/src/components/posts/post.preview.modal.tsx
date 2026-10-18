@@ -18,11 +18,14 @@ import {
   PREVIEW_NETWORKS,
   PreviewFormat,
 } from '@gitroom/frontend/components/posts/post.preview.networks';
+import { BoostPost } from '@gitroom/frontend/components/ads/ads.boost.modal';
 
 interface PostGroupResponse {
   posts: {
     id: string;
     content: string;
+    state: string;
+    releaseId: string | null;
     image: { id: string; path: string }[];
     integration?: {
       name: string;
@@ -136,6 +139,8 @@ const PostPreviewModal: FC<{ group: string; close: () => void }> = ({
     window.open(`/p/${root?.id}?share=true`, '_blank');
   }, [root]);
 
+  const boost = useCallback(() => update({ boost: root?.id || null }), [update, root]);
+
   const formatLabels: Record<PreviewFormat, string> = {
     text: t('format_text', 'Text'),
     image: t('format_image', 'Image'),
@@ -214,6 +219,11 @@ const PostPreviewModal: FC<{ group: string; close: () => void }> = ({
             <PillButton variant="secondary" onClick={share}>
               {t('open_share_link', 'Open link for third parties')}
             </PillButton>
+            {root.state === 'PUBLISHED' && root.releaseId && (
+              <PillButton data-testid="preview-boost" variant="primary" onClick={boost}>
+                {t('ads_boost_post', 'Boost post')}
+              </PillButton>
+            )}
           </div>
           <div className="flex-1 flex justify-center">
             <div className="w-full max-w-[375px]">
@@ -262,5 +272,5 @@ export const PostPreview: FC = () => {
     return () => modals.closeById('post-preview');
   }, [group]);
 
-  return null;
+  return <BoostPost />;
 };

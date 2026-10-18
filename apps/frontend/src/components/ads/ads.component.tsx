@@ -1,10 +1,9 @@
 'use client';
 
-import { FC, useCallback, useMemo, useState } from 'react';
+import { FC, FormEvent, useCallback, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useT, useTranslationSettings } from '@gitroom/react/translation/get.transation.service.client';
-import { displayLocales } from '@gitroom/react/translation/i18n.config';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
@@ -12,6 +11,9 @@ import { useLocalDate } from '@gitroom/frontend/components/dashboard/use.dashboa
 import { Card, CardHeader } from '@gitroom/frontend/components/ui/card';
 import { PillButton } from '@gitroom/frontend/components/ui/pill.button';
 import { PillTabs } from '@gitroom/frontend/components/ui/pill.tabs';
+import { inputClass } from '@gitroom/frontend/components/ui/field';
+import { BudgetCard } from '@gitroom/frontend/components/ads/ads.budget.component';
+import { AutoBoostCard } from '@gitroom/frontend/components/ads/ads.auto.boost.component';
 import {
   AdAccount,
   AdsCampaignRow,
@@ -20,6 +22,7 @@ import {
   useAdsAccounts,
   useAdsActions,
   useAdsProviders,
+  useAdsFormat,
   useAdsSummary,
 } from '@gitroom/frontend/components/ads/use.ads';
 
@@ -32,22 +35,7 @@ const campaignStatusStyles: Record<AdsCampaignRow['status'], string> = {
   removed: 'bg-statusErrorBg text-statusErrorText',
 };
 
-export const useAdsFormat = () => {
-  const { language } = useTranslationSettings();
-  const locale = displayLocales[language] || language;
-  return useMemo(
-    () => ({
-      money: (cents: number, currency: string) =>
-        new Intl.NumberFormat(locale, { style: 'currency', currency }).format(cents / 100),
-      number: (value: number) => new Intl.NumberFormat(locale).format(Math.round(value)),
-      percent: (value: number) =>
-        new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 2 }).format(value),
-    }),
-    [locale]
-  );
-};
-
-const ProviderIcon: FC<{ provider: string; size?: number }> = ({ provider, size = 40 }) => (
+export const ProviderIcon: FC<{ provider: string; size?: number }> = ({ provider, size = 40 }) => (
   <img
     src={`/icons/platforms/${provider}.svg`}
     alt=""
@@ -212,6 +200,101 @@ const AccountsCard: FC<{ accounts: AdAccount[]; providers: AdsProviderOption[] }
   );
 };
 
+const CampaignActions: FC<{ campaign: AdsCampaignRow }> = ({ campaign }) => {
+  const t = useT();
+  const toaster = useToaster();
+  const { setCampaignStatus, setCampaignBudget } = useAdsActions();
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState('');
+
+  const run = useCallback(async (action: () => Promise<void>, success: string) => {
+    setBusy(true);
+    try {
+      await action();
+      toaster.show(success, 'success');
+      return true;
+    } catch (err: unknown) {
+      toaster.show(err instanceof Error ? err.message : String(err), 'warning');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const toggle = useCallback(async () => {
+    if (campaign.status === 'paused') {
+      if (
+        !(await deleteDialog(
+          t('ads_resume_question', 'Resume {{name}}? It starts spending its budget again.', {
+            name: campaign.name,
+            interpolation: { escapeValue: false },
+          }),
+          t('ads_resume', 'Resume')
+        ))
+      ) {
+        return;
+      }
+      await run(() => setCampaignStatus(campaign.id, 'active'), t('ads_campaign_resumed', 'Campaign resumed'));
+      return;
+    }
+    await run(() => setCampaignStatus(campaign.id, 'paused'), t('ads_campaign_paused', 'Campaign paused'));
+  }, [campaign, run]);
+
+  const startEditing = useCallback(() => {
+    setAmount(campaign.budgetAmount ? String(campaign.budgetAmount / 100) : '');
+    setEditing(true);
+  }, [campaign]);
+
+  const saveBudget = useCallback(
+    async (event: FormEvent) => {
+      event.preventDefault();
+      const cents = Math.round(Number(amount.replace(',', '.')) * 100);
+      if (await run(() => setCampaignBudget(campaign.id, cents), t('ads_budget_changed', 'Budget changed'))) {
+        setEditing(false);
+      }
+    },
+    [amount, campaign, run]
+  );
+
+  if (campaign.status === 'removed') {
+    return null;
+  }
+
+  if (editing) {
+    return (
+      <form data-testid="ads-campaign-budget-form" className="flex items-center gap-[8px]" onSubmit={saveBudget}>
+        <input
+          aria-label={t('ads_new_budget_in', 'New budget in {{currency}}', { currency: campaign.currency })}
+          inputMode="decimal"
+          className={clsx(inputClass, '!h-[40px] w-[120px]')}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <PillButton type="submit" variant="primary" className="!h-[40px] !px-[16px] !text-[14px]" disabled={busy}>
+          {t('save', 'Save')}
+        </PillButton>
+        <PillButton className="!h-[40px] !px-[16px] !text-[14px]" disabled={busy} onClick={() => setEditing(false)}>
+          {t('cancel', 'Cancel')}
+        </PillButton>
+      </form>
+    );
+  }
+
+  return (
+    <span className="flex gap-[8px]">
+      <PillButton className="!h-[40px] !px-[16px] !text-[14px]" disabled={busy} onClick={toggle}>
+        {campaign.status === 'paused' ? t('ads_resume', 'Resume') : t('ads_pause', 'Pause')}
+      </PillButton>
+      {campaign.budgetAmount !== null && (
+        <PillButton className="!h-[40px] !px-[16px] !text-[14px]" disabled={busy} onClick={startEditing}>
+          {t('ads_change_budget', 'Budget')}
+        </PillButton>
+      )}
+    </span>
+  );
+};
+
 const CampaignsCard: FC<{ campaigns: AdsCampaignRow[] }> = ({ campaigns }) => {
   const t = useT();
   const format = useAdsFormat();
@@ -270,6 +353,7 @@ const CampaignsCard: FC<{ campaigns: AdsCampaignRow[] }> = ({ campaigns }) => {
                   {t('ads_clicks_count', '{{clicks}} clicks', { clicks: format.number(campaign.clicks) })}
                 </span>
               </span>
+              <CampaignActions campaign={campaign} />
             </li>
           ))}
         </ul>
@@ -383,7 +467,7 @@ export const AdsComponent: FC = () => {
           <span className="text-[16px] text-textItemBlur max-w-[520px]">
             {t(
               'ads_empty_description',
-              'Connect Meta Ads or Google Ads to follow spend, clicks and campaigns next to your posts. Access is read only.'
+              'Connect Meta Ads or Google Ads to follow spend and campaigns, boost published posts and keep a monthly budget.'
             )}
           </span>
         </Card>
@@ -406,6 +490,11 @@ export const AdsComponent: FC = () => {
           <div className="flex flex-wrap gap-[16px] items-start">
             <CampaignsCard campaigns={summary?.campaigns || []} />
             {mainTotals && <DailySpendCard days={mainDays} currency={mainTotals.currency} />}
+          </div>
+
+          <div className="flex flex-wrap gap-[16px] items-start">
+            <BudgetCard />
+            <AutoBoostCard />
           </div>
 
           <AccountsCard accounts={accounts} providers={providers} />

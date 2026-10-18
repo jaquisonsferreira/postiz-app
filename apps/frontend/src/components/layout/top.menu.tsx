@@ -7,6 +7,7 @@ import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { MenuItem } from '@gitroom/frontend/components/new-layout/menu-item';
 import { usePendingApprovals } from '@gitroom/frontend/components/approvals/use.compositions';
+import { useBoosts } from '@gitroom/frontend/components/ads/use.ads';
 
 type MenuSection = 'content' | 'automation' | 'settings';
 
@@ -41,6 +42,7 @@ const Icon: FC<{ children: ReactNode }> = ({ children }) => (
 export const useMenuItem = () => {
   const t = useT();
   const pendingApprovals = usePendingApprovals();
+  const { data: pendingBoosts = [] } = useBoosts('awaiting_approval');
 
   const all = [
     {
@@ -118,7 +120,7 @@ export const useMenuItem = () => {
       section: 'automation',
       name: t('approvals', 'Approvals'),
       path: '/approvals',
-      badge: pendingApprovals,
+      badge: pendingApprovals + pendingBoosts.length,
       icon: (
         <Icon>
           <rect x="3" y="3" width="18" height="18" rx="3" />

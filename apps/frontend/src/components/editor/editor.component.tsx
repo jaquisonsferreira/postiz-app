@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -20,6 +20,7 @@ import {
   useChannelSettingsSchema,
 } from '@gitroom/frontend/components/editor/use.channel.settings';
 import { Card, CardHeader } from '@gitroom/frontend/components/ui/card';
+import { Field, inputClass } from '@gitroom/frontend/components/ui/field';
 import { PillTabs } from '@gitroom/frontend/components/ui/pill.tabs';
 import { PillButton } from '@gitroom/frontend/components/ui/pill.button';
 import { ChannelIcon } from '@gitroom/frontend/components/ui/channel.icon';
@@ -56,18 +57,6 @@ const emptySlide = (): SlideDraft => ({
   theme: '',
   background: { type: 'none' },
 });
-
-const inputClass =
-  'w-full h-[48px] px-[16px] rounded-[16px] bg-newBgColor text-[15px] text-newTextColor outline-none focus:ring-2 focus:ring-accent';
-
-const Field: FC<{ label: string; children: (id: string) => ReactNode; id: string }> = ({ label, children, id }) => (
-  <div className="flex flex-col gap-[6px]">
-    <label htmlFor={id} className="text-[14px] text-textItemBlur">
-      {label}
-    </label>
-    {children(id)}
-  </div>
-);
 
 const SlidePreview: FC<{
   slide: SlideDraft;
