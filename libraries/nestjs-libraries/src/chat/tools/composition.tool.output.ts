@@ -1,4 +1,3 @@
-import { HttpException } from '@nestjs/common';
 import { z } from 'zod';
 import type { CompositionMedia } from '@gitroom/nestjs-libraries/compositions/composition.posts.builder';
 import type { CompositionPost } from '@gitroom/nestjs-libraries/database/prisma/compositions/composition.service';
@@ -64,12 +63,3 @@ export const presentComposition = <T extends StoredComposition>(composition: T) 
     previewUrl: `${process.env.FRONTEND_URL}/p/${post.postId}?share=true`,
   })),
 });
-
-// The service refuses with the HTTP status the app shows; a tool answers the
-// same refusal as output.errors, so the client can fix the call and retry
-export const asToolErrors = (err: unknown) => {
-  if (err instanceof HttpException) {
-    return { output: { errors: err.message } };
-  }
-  throw err;
-};

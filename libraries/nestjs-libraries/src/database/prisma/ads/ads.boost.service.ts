@@ -1,6 +1,6 @@
 import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { TemporalService } from 'nestjs-temporal-core';
-import { TypedSearchAttributes } from '@temporalio/common';
+import { TypedSearchAttributes, WorkflowExecutionAlreadyStartedError } from '@temporalio/common';
 import { organizationId } from '@gitroom/nestjs-libraries/temporal/temporal.search.attribute';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { AdsBoostRepository } from '@gitroom/nestjs-libraries/database/prisma/ads/ads.boost.repository';
@@ -12,6 +12,7 @@ import {
 } from '@gitroom/nestjs-libraries/database/prisma/ads/ads.service';
 import { AdsManager } from '@gitroom/nestjs-libraries/integrations/ads/ads.manager';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
+import { AdsApiError } from '@gitroom/nestjs-libraries/integrations/ads/ads.errors';
 import {
   AdsAudience,
   AdsBoostObjective,
@@ -23,6 +24,7 @@ import {
 } from '@gitroom/nestjs-libraries/integrations/ads/ads.interface';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const NOT_AVAILABLE = 'Boosting is not available right now';
 const NAME_LENGTH = 48;
 
 export type BoostOrigin = 'manual' | 'agent' | 'auto';
@@ -102,6 +104,10 @@ export class AdsBoostService {
         rule?.approvalThreshold !== undefined &&
         total > rule.approvalThreshold);
 
+    if (!needsApproval) {
+      this.workflowClient();
+    }
+
     const boost = await this._boostRepository.createBoost({
       organizationId: org,
       adAccountId: account.id,
@@ -129,16 +135,15 @@ export class AdsBoostService {
     return this._boostRepository.listBoosts(org, status);
   }
 
+  // Claiming the status in one write makes a second click or tab a refusal
+  // instead of a second launch
   async approve(org: string, id: string) {
-    await this.awaitingApproval(org, id);
-    const boost = await this._boostRepository.updateBoost(id, { status: 'launching' });
+    await this.decide(org, id, 'launching');
     await this.start(org, id);
-    return boost;
   }
 
   async reject(org: string, id: string) {
-    await this.awaitingApproval(org, id);
-    return this._boostRepository.updateBoost(id, { status: 'rejected' });
+    await this.decide(org, id, 'rejected');
   }
 
   // The dates are fixed on the first attempt and every id the platform gives is
@@ -193,7 +198,10 @@ export class AdsBoostService {
       )
     );
 
-    const campaignId = created.campaignId!;
+    const campaignId = created.campaignId;
+    if (!campaignId) {
+      throw new AdsApiError(`${this._adsManager.getProvider(account.provider)?.name} did not create the campaign`);
+    }
     await this._adsService.onPlatform(account, (provider, accessToken) =>
       provider.setCampaignStatus(accessToken, reference, campaignId, 'active')
     );
@@ -215,11 +223,16 @@ export class AdsBoostService {
   async autoBoost() {
     let created = 0;
     let failed = 0;
+    const month = monthKey();
+    const lastDay = new Date(Date.now() - DAY_MS);
     for (const rule of await this._boostRepository.autoBoostRules()) {
-      for (const post of await this._boostRepository.postsToAutoBoost(
-        rule.integrationId,
-        rule.createdAt
-      )) {
+      if ((await this._adsRepository.getRule(rule.adAccountId))?.cappedMonth === month) {
+        continue;
+      }
+      // A post that keeps failing stops being tried after a day, and a month
+      // that was capped never comes back as a backlog of boosts
+      const since = rule.createdAt > lastDay ? rule.createdAt : lastDay;
+      for (const post of await this._boostRepository.postsToAutoBoost(rule.integrationId, since)) {
         try {
           await this.create(
             rule.organizationId,
@@ -291,8 +304,11 @@ export class AdsBoostService {
 
   private checkCapabilities(
     provider: AdsProvider,
-    body: Pick<BoostRequest, 'objective' | 'budgetType' | 'destinationUrl' | 'texts'>
+    body: Pick<BoostRequest, 'objective' | 'budgetType' | 'destinationUrl' | 'texts' | 'audience'>
   ) {
+    if (body.audience.ageMin > body.audience.ageMax) {
+      throw new HttpException('The minimum age must not be above the maximum', 400);
+    }
     if (!provider.boost.objectives.includes(body.objective)) {
       throw new HttpException(`${provider.name} cannot run this objective`, 400);
     }
@@ -343,23 +359,27 @@ export class AdsBoostService {
     return { post, reference };
   }
 
-  private async awaitingApproval(org: string, id: string) {
-    const boost = await this._boostRepository.getBoost(org, id);
-    if (!boost) {
+  private async decide(org: string, id: string, status: 'launching' | 'rejected') {
+    if (await this._boostRepository.claimBoost(org, id, status)) {
+      return;
+    }
+    if (!(await this._boostRepository.getBoost(org, id))) {
       throw new HttpException('Boost not found', 404);
     }
-    if (boost.status !== 'awaiting_approval') {
-      throw new HttpException('This boost is not waiting for approval', 400);
+    throw new HttpException('This boost is not waiting for approval', 400);
+  }
+
+  private workflowClient() {
+    const client = this._temporalService.client.getRawClient();
+    if (!client) {
+      throw new HttpException(NOT_AVAILABLE, 503);
     }
-    return boost;
+    return client;
   }
 
   private async start(org: string, id: string) {
-    const client = this._temporalService.client.getRawClient();
+    const client = this.workflowClient();
     try {
-      if (!client) {
-        throw new Error('Temporal client is not available');
-      }
       await client.workflow.start('adBoostWorkflow', {
         workflowId: `ad-boost-${id}`,
         taskQueue: 'main',
@@ -369,12 +389,12 @@ export class AdsBoostService {
         ]),
       });
     } catch (err: unknown) {
+      if (err instanceof WorkflowExecutionAlreadyStartedError) {
+        return;
+      }
       this._logger.error(`Could not start boost ${id}`, err);
-      await this._boostRepository.updateBoost(id, {
-        status: 'failed',
-        error: 'Boosting is not available right now',
-      });
-      throw new HttpException('Boosting is not available right now', 503);
+      await this._boostRepository.updateBoost(id, { status: 'failed', error: NOT_AVAILABLE });
+      throw new HttpException(NOT_AVAILABLE, 503);
     }
   }
 }

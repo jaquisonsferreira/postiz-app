@@ -14,9 +14,9 @@ import {
   SLIDE_THEMES,
 } from '@gitroom/nestjs-libraries/dtos/compositions/create.composition.dto';
 import {
-  asToolErrors,
   compositionErrors,
 } from '@gitroom/nestjs-libraries/chat/tools/composition.tool.output';
+import { asToolErrors } from '@gitroom/nestjs-libraries/chat/tools/tool.errors';
 
 const validationMessages = (errors: ValidationError[]): string[] =>
   errors.flatMap((error) => [

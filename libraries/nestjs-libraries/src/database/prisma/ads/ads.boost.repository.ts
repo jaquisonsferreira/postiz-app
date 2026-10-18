@@ -151,6 +151,14 @@ export class AdsBoostRepository {
     });
   }
 
+  async claimBoost(org: string, id: string, status: 'launching' | 'rejected'): Promise<number> {
+    const { count } = await this._adBoost.model.adBoost.updateMany({
+      where: { id, organizationId: org, deletedAt: null, status: 'awaiting_approval' },
+      data: { status },
+    });
+    return count;
+  }
+
   getBoostToLaunch(id: string) {
     return this._adBoost.model.adBoost.findFirst({
       where: { id, deletedAt: null },

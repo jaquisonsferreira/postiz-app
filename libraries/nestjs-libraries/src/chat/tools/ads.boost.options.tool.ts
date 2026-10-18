@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { Injectable } from '@nestjs/common';
 import { checkAuth } from '@gitroom/nestjs-libraries/chat/auth.context';
 import { AdsBoostService } from '@gitroom/nestjs-libraries/database/prisma/ads/ads.boost.service';
-import { asToolErrors } from '@gitroom/nestjs-libraries/chat/tools/composition.tool.output';
+import { asToolErrors } from '@gitroom/nestjs-libraries/chat/tools/tool.errors';
 
 @Injectable()
 export class AdsBoostOptionsTool implements AgentToolInterface {

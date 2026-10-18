@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { Injectable } from '@nestjs/common';
 import { checkAuth } from '@gitroom/nestjs-libraries/chat/auth.context';
 import { AdsService } from '@gitroom/nestjs-libraries/database/prisma/ads/ads.service';
-import { asToolErrors } from '@gitroom/nestjs-libraries/chat/tools/composition.tool.output';
+import { asToolErrors } from '@gitroom/nestjs-libraries/chat/tools/tool.errors';
 
 export const adsCampaignOutput = z
   .object({ id: z.string(), status: z.string(), budgetAmount: z.number().nullable() })

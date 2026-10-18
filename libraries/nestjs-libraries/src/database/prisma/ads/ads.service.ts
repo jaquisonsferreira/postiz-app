@@ -280,6 +280,12 @@ export class AdsService {
     if (campaign.status === 'removed') {
       throw new HttpException('This campaign was removed on the platform', 400);
     }
+    if (
+      status === 'active' &&
+      (await this._adsRepository.getRule(campaign.adAccount.id))?.cappedMonth === monthKey()
+    ) {
+      throw new HttpException('This ad account reached its monthly budget', 400);
+    }
     await this.onPlatform(campaign.adAccount, (provider, accessToken) =>
       provider.setCampaignStatus(
         accessToken,

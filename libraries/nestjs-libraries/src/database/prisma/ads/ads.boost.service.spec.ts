@@ -1,5 +1,6 @@
 import { HttpException } from '@nestjs/common';
 import { TemporalService } from 'nestjs-temporal-core';
+import { WorkflowExecutionAlreadyStartedError } from '@temporalio/common';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { AdsBoostService } from '@gitroom/nestjs-libraries/database/prisma/ads/ads.boost.service';
 import { AdsBoostRepository } from '@gitroom/nestjs-libraries/database/prisma/ads/ads.boost.repository';
@@ -345,9 +346,11 @@ describe('AdsBoostService', () => {
     });
 
     it('keeps the boost launching when its workflow was already started', async () => {
-      const already = Object.assign(new Error('Workflow execution already started'), {
-        name: 'WorkflowExecutionAlreadyStartedError',
-      });
+      const already = new WorkflowExecutionAlreadyStartedError(
+        'Workflow execution already started',
+        'ad-boost-impulso',
+        'adBoostWorkflow'
+      );
       const { service, boostRepository } = setup({
         start: jest.fn(async () => {
           throw already;
