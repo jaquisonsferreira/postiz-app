@@ -18,7 +18,7 @@ const PUBLIC_FIELDS = {
   createdAt: true,
 } as const;
 
-const SYNC_FIELDS = {
+export const SYNC_FIELDS = {
   id: true,
   organizationId: true,
   name: true,

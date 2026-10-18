@@ -9,6 +9,12 @@ import { AdsManager } from '@gitroom/nestjs-libraries/integrations/ads/ads.manag
 import { AdsProvider } from '@gitroom/nestjs-libraries/integrations/ads/ads.interface';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 
+// The integration manager loads ESM-only packages that Jest can't require, each
+// test passes the stub of the calls it expects
+jest.mock('@gitroom/nestjs-libraries/integrations/integration.manager', () => ({
+  IntegrationManager: class IntegrationManager {},
+}));
+
 process.env.JWT_SECRET = 'segredo-de-teste';
 
 const account = {

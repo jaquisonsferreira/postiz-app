@@ -72,7 +72,7 @@ const expirationFrom = (tokens: AdsTokens) =>
 export const monthStart = (date = new Date()) =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 
-const monthKey = (date = new Date()) => date.toISOString().slice(0, 7);
+export const monthKey = (date = new Date()) => date.toISOString().slice(0, 7);
 
 export const referenceOf = (account: SyncAccount) => ({
   externalId: account.externalId,
