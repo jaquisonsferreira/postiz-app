@@ -15,6 +15,7 @@ export class AdsManager {
       identifier: provider.identifier,
       name: provider.name,
       configured: provider.isConfigured(),
+      boost: provider.boost,
     }));
   }
 
