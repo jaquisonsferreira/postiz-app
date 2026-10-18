@@ -9,7 +9,7 @@ import { AdsActivity } from '@gitroom/orchestrator/activities/ads.activity';
 
 // An account that fails is logged and skipped inside the activity, so a retry
 // only happens when the whole run could not start
-const { syncAdAccounts } = proxyActivities<AdsActivity>({
+const { syncAdAccounts, guardAdBudgets, autoBoostPosts } = proxyActivities<AdsActivity>({
   startToCloseTimeout: '30 minute',
   retry: {
     maximumAttempts: 3,
@@ -18,12 +18,20 @@ const { syncAdAccounts } = proxyActivities<AdsActivity>({
   },
 });
 
-const syncLogged = async () => {
+const logged = async (name: string, run: () => Promise<unknown>) => {
   try {
-    await syncAdAccounts();
+    await run();
   } catch (err) {
-    log.error('Ad accounts sync failed, trying again in the next hour', { err });
+    log.error(`${name} failed, trying again in the next hour`, { err });
   }
+};
+
+// The budget guard reads the spend the sync just saved, and new posts are
+// only boosted after a cap had the chance to stop the account
+const syncLogged = async () => {
+  await logged('Ad accounts sync', syncAdAccounts);
+  await logged('Ad budget guard', guardAdBudgets);
+  await logged('Automatic boost', autoBoostPosts);
 };
 
 export async function adsSyncWorkflow() {

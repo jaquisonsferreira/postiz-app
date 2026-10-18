@@ -21,3 +21,4 @@ export * from './process.media.workflow';
 export * from './clipping.workflow';
 export * from './composition.workflow';
 export * from './ads.sync.workflow';
+export * from './ad.boost.workflow';
