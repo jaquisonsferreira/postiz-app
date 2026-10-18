@@ -259,8 +259,12 @@ export class AdsBoostService {
     if (!account) {
       throw new HttpException('Ad account not found', 404);
     }
-    if (!(await this._boostRepository.getIntegration(org, body.integrationId))) {
+    const integration = await this._boostRepository.getIntegration(org, body.integrationId);
+    if (!integration) {
       throw new HttpException('Channel not found', 404);
+    }
+    if (!this._integrationManager.getSocialIntegration(integration.providerIdentifier)?.promotableReference) {
+      throw new HttpException('Posts of this channel cannot be promoted', 400);
     }
     const provider = this._adsManager.getProvider(account.provider);
     if (!provider) {

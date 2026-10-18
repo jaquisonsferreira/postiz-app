@@ -180,7 +180,7 @@ export class AdsBoostRepository {
   getIntegration(org: string, id: string) {
     return this._integration.model.integration.findFirst({
       where: { id, organizationId: org, deletedAt: null },
-      select: { id: true },
+      select: { id: true, providerIdentifier: true },
     });
   }
 
