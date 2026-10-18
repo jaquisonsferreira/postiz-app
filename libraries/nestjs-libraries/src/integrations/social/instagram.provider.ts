@@ -1,3 +1,4 @@
+import { AdsPromotableReference } from '@gitroom/nestjs-libraries/integrations/ads/ads.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -1090,6 +1091,27 @@ export class InstagramProvider
       pendingData = result.pendingData;
       await timer(30000);
     }
+  }
+
+  // The ad is created through the Facebook page the Instagram account is linked
+  // to, and the stored page token answers with that page
+  async promotableReference(
+    token: string,
+    releaseId: string,
+    integration: Integration
+  ): Promise<AdsPromotableReference> {
+    const [accessToken] = token.split('___');
+    const page = await (
+      await this.fetch(
+        `https://graph.facebook.com/${META_GRAPH_API_VERSION}/me?fields=id&access_token=${accessToken}`
+      )
+    ).json();
+    return {
+      type: 'meta-instagram-media',
+      id: releaseId,
+      pageId: page.id,
+      instagramUserId: integration.internalId,
+    };
   }
 
   async comment(

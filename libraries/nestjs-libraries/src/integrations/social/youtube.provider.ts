@@ -1,3 +1,4 @@
+import { AdsPromotableReference } from '@gitroom/nestjs-libraries/integrations/ads/ads.interface';
 import {
   AnalyticsData,
   AuthTokenDetails,
@@ -920,6 +921,18 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
 
       pendingData = finalize.pendingData;
     }
+  }
+
+  async promotableReference(
+    accessToken: string,
+    releaseId: string,
+    integration: Integration
+  ): Promise<AdsPromotableReference> {
+    return {
+      type: 'youtube-video',
+      id: releaseId,
+      logoUrl: integration.picture || undefined,
+    };
   }
 
   async analytics(
