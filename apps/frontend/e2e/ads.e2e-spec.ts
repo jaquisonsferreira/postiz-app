@@ -1,4 +1,5 @@
-import { AppSession, FRONTEND_URL, openAppSession, prisma } from './app.session';
+import { randomUUID } from 'crypto';
+import { AppSession, createChannel, FRONTEND_URL, openAppSession, prisma } from './app.session';
 
 const day = (daysAgo: number) => {
   const date = new Date();
@@ -7,7 +8,17 @@ const day = (daysAgo: number) => {
   return date;
 };
 
+const clearAds = async (organizationId: string) => {
+  await prisma.adBoost.deleteMany({ where: { organizationId } });
+  await prisma.adAutoBoost.deleteMany({ where: { organizationId } });
+  await prisma.adBudgetRule.deleteMany({ where: { adAccount: { organizationId } } });
+  await prisma.adMetricDaily.deleteMany({ where: { adCampaign: { adAccount: { organizationId } } } });
+  await prisma.adCampaign.deleteMany({ where: { adAccount: { organizationId } } });
+  await prisma.adAccount.deleteMany({ where: { organizationId } });
+};
+
 const createAdAccount = async (organizationId: string) => {
+  await clearAds(organizationId);
   const account = await prisma.adAccount.create({
     data: {
       organizationId,
@@ -55,9 +66,7 @@ describe('Anúncios', () => {
   });
 
   afterAll(async () => {
-    await prisma.adMetricDaily.deleteMany({ where: { adCampaign: { adAccount: { organizationId: session.orgId } } } });
-    await prisma.adCampaign.deleteMany({ where: { adAccount: { organizationId: session.orgId } } });
-    await prisma.adAccount.deleteMany({ where: { organizationId: session.orgId } });
+    await clearAds(session.orgId);
     await session.close();
     await prisma.$disconnect();
   });
@@ -74,7 +83,9 @@ describe('Anúncios', () => {
     await page.getByTestId('ads-connect-meta-ads').click();
     await page.waitForURL(/facebook\.com/);
     const login = new URL(page.url());
-    expect(login.searchParams.get('scope')).toBe('ads_read,business_management');
+    expect(login.searchParams.get('scope')).toBe(
+      'ads_read,ads_management,business_management,pages_show_list,pages_read_engagement,pages_manage_ads,instagram_basic'
+    );
     expect(login.searchParams.get('redirect_uri')).toBe(`${FRONTEND_URL}/ads/connect/meta-ads`);
     expect(login.searchParams.get('state')).toBeTruthy();
   });
@@ -121,5 +132,126 @@ describe('Anúncios', () => {
       select: { deletedAt: true },
     });
     expect(removed.deletedAt).not.toBeNull();
+  });
+
+  it('cria, edita e remove a regra de orçamento mensal da conta', async () => {
+    const { page } = session;
+    const account = await createAdAccount(session.orgId);
+
+    await page.goto(`${FRONTEND_URL}/ads?period=30d`);
+    const budget = page.getByTestId('ads-budget-account').filter({ hasText: 'Loja da Pauta' });
+    await budget.waitFor();
+    expect(await budget.getByTestId('ads-budget-summary').textContent()).toContain('neste mês, sem teto');
+
+    await budget.getByRole('button', { name: 'Criar regra' }).click();
+    await budget.getByLabel('Teto mensal em BRL').fill('500');
+    await budget.getByLabel('Aprovação acima de, em BRL').fill('100');
+    await budget.getByLabel('Alertar em (% do teto)').fill('80');
+    await budget.getByRole('button', { name: 'Salvar' }).click();
+    await page.getByText('Regra de orçamento salva').waitFor();
+    await budget.getByRole('progressbar').waitFor();
+    expect(await budget.getByTestId('ads-budget-summary').textContent()).toMatch(/de R\$\s?500,00 neste mês · Aprovação acima de R\$\s?100,00/);
+    expect(
+      await prisma.adBudgetRule.findUniqueOrThrow({
+        where: { adAccountId: account.id },
+        select: { monthlyCap: true, approvalThreshold: true, alertAt: true },
+      })
+    ).toEqual({ monthlyCap: 50000, approvalThreshold: 10000, alertAt: 80 });
+
+    await budget.getByRole('button', { name: 'Editar regra' }).click();
+    await budget.getByLabel('Teto mensal em BRL').fill('800');
+    await budget.getByRole('button', { name: 'Salvar' }).click();
+    await budget.getByText(/de R\$\s?800,00 neste mês/).waitFor();
+    expect(
+      (await prisma.adBudgetRule.findUniqueOrThrow({ where: { adAccountId: account.id } })).monthlyCap
+    ).toBe(80000);
+
+    await budget.getByRole('button', { name: 'Remover' }).click();
+    await page.getByRole('button', { name: 'Sim, exclua!' }).click();
+    await page.getByText('Regra de orçamento removida').waitFor();
+    await budget.getByRole('button', { name: 'Criar regra' }).waitFor();
+    expect(await prisma.adBudgetRule.count({ where: { adAccountId: account.id } })).toBe(0);
+  });
+
+  it('impulsiona um post publicado do Facebook, manda para aprovação acima do limite e rejeita', async () => {
+    const { page } = session;
+    const account = await createAdAccount(session.orgId);
+    await prisma.adBudgetRule.create({ data: { adAccountId: account.id, approvalThreshold: 5000 } });
+    const channel = await createChannel(session.orgId, 'facebook', 'Página da Loja');
+    const group = randomUUID();
+    const post = await prisma.post.create({
+      data: {
+        organizationId: session.orgId,
+        integrationId: channel.id,
+        content: '<p>Promoção de primavera na loja</p>',
+        group,
+        publishDate: new Date(),
+        state: 'PUBLISHED',
+        releaseId: '900_800',
+        releaseURL: 'https://www.facebook.com/900_800',
+      },
+      select: { id: true },
+    });
+
+    await page.goto(`${FRONTEND_URL}/posts?preview=${group}`);
+    await page.getByTestId('post-preview-modal').getByTestId('preview-boost').click();
+    await page.waitForURL(new RegExp(`boost=${post.id}`));
+    const modal = page.getByTestId('boost-modal');
+    await modal.getByTestId('boost-amount').waitFor();
+    expect(await modal.getByTestId('boost-account').inputValue()).toBe(account.id);
+    await modal.getByTestId('boost-amount').fill('15');
+    await modal.getByTestId('boost-days').fill('4');
+    await modal.getByText(/Até R\$\s?60,00 em 4 dias/).waitFor();
+    await modal.getByRole('button', { name: 'Impulsionar' }).click();
+    await page.getByText('Impulsionamento enviado para aprovação').waitFor();
+
+    const boost = await prisma.adBoost.findFirstOrThrow({
+      where: { postId: post.id },
+      select: { id: true, status: true, origin: true, budgetAmount: true, days: true, reference: true },
+    });
+    expect(boost).toMatchObject({ status: 'awaiting_approval', origin: 'manual', budgetAmount: 1500, days: 4 });
+    expect(JSON.parse(boost.reference)).toEqual({ type: 'meta-post', id: '900_800' });
+
+    await page.goto(`${FRONTEND_URL}/approvals`);
+    const approval = page.getByTestId('boost-approval').filter({ hasText: 'Promoção de primavera na loja' });
+    await approval.waitFor();
+    expect(await approval.textContent()).toMatch(/Loja da Pauta · Criado na Pauta · Até R\$\s?60,00 em 4 dias/);
+    await approval.getByRole('button', { name: 'Rejeitar' }).click();
+    await page.getByRole('button', { name: 'Sim, exclua!' }).click();
+    await page.getByText('Impulsionamento rejeitado').waitFor();
+    await approval.waitFor({ state: 'detached' });
+    expect((await prisma.adBoost.findUniqueOrThrow({ where: { id: boost.id } })).status).toBe('rejected');
+  });
+
+  it('liga e desliga o impulsionar automático de um canal', async () => {
+    const { page } = session;
+    const account = await createAdAccount(session.orgId);
+    const channel = await createChannel(session.orgId, 'instagram', 'Instagram da Loja');
+
+    await page.goto(`${FRONTEND_URL}/ads`);
+    const card = page.getByTestId('ads-auto-boosts');
+    await card.getByTestId('ads-auto-boost-add').click();
+    const form = card.getByTestId('ads-auto-boost-form');
+    await form.getByTestId('auto-boost-channel').selectOption({ label: 'Instagram da Loja' });
+    await form.getByTestId('boost-amount').fill('10');
+    await form.getByTestId('boost-days').fill('3');
+    await form.getByRole('button', { name: 'Salvar' }).click();
+    await page.getByText('Os novos posts deste canal serão impulsionados').waitFor();
+
+    const row = card.getByTestId('ads-auto-boost').filter({ hasText: 'Instagram da Loja' });
+    await row.waitFor();
+    expect(await row.textContent()).toMatch(/Loja da Pauta · R\$\s?10,00 por dia durante 3 dias/);
+    expect(
+      await prisma.adAutoBoost.findUniqueOrThrow({
+        where: { integrationId: channel.id },
+        select: { adAccountId: true, budgetAmount: true, days: true, objective: true },
+      })
+    ).toEqual({ adAccountId: account.id, budgetAmount: 1000, days: 3, objective: 'engagement' });
+
+    await row.getByRole('button', { name: 'Remover' }).click();
+    await page.getByRole('button', { name: 'Sim, exclua!' }).click();
+    await page.getByText('Impulsionar automático desligado').waitFor();
+    await row.waitFor({ state: 'detached' });
+    expect(await prisma.adAutoBoost.count({ where: { integrationId: channel.id } })).toBe(0);
   });
 });
