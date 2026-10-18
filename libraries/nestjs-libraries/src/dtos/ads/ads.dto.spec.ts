@@ -128,8 +128,7 @@ describe('Ads DTOs', () => {
   });
 
   it('exige o canal no impulsionar automático', async () => {
-    const { postId, ...rule } = boost;
-    expect(postId).toBe('post-1');
+    const rule = { ...boost, postId: undefined };
     expect(await errorsOf(AdsAutoBoostDto, { ...rule, integrationId: 'channel-1' })).toEqual([]);
     expect(await errorsOf(AdsAutoBoostDto, rule)).toEqual(['integrationId']);
   });
