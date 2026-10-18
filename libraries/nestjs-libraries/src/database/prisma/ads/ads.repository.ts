@@ -20,6 +20,8 @@ const PUBLIC_FIELDS = {
 
 const SYNC_FIELDS = {
   id: true,
+  organizationId: true,
+  name: true,
   provider: true,
   externalId: true,
   loginCustomerId: true,
@@ -35,7 +37,8 @@ export class AdsRepository {
   constructor(
     private _adAccount: PrismaRepository<'adAccount'>,
     private _adCampaign: PrismaRepository<'adCampaign'>,
-    private _adMetricDaily: PrismaRepository<'adMetricDaily'>
+    private _adMetricDaily: PrismaRepository<'adMetricDaily'>,
+    private _adBudgetRule: PrismaRepository<'adBudgetRule'>
   ) {}
 
   listAccounts(org: string) {
@@ -172,6 +175,108 @@ export class AdsRepository {
           orderBy: { date: 'asc' },
         },
       },
+    });
+  }
+
+  getCampaign(org: string, id: string) {
+    return this._adCampaign.model.adCampaign.findFirst({
+      where: { id, adAccount: { organizationId: org, deletedAt: null } },
+      select: {
+        id: true,
+        externalId: true,
+        status: true,
+        budgetType: true,
+        adAccount: { select: SYNC_FIELDS },
+      },
+    });
+  }
+
+  updateCampaign(id: string, data: { status?: string; budgetAmount?: number }) {
+    return this._adCampaign.model.adCampaign.update({
+      where: { id },
+      data,
+      select: { id: true, status: true, budgetAmount: true },
+    });
+  }
+
+  activeCampaigns(adAccountId: string) {
+    return this._adCampaign.model.adCampaign.findMany({
+      where: { adAccountId, status: 'active' },
+      select: { id: true, externalId: true },
+    });
+  }
+
+  async spendSince(adAccountId: string, from: Date): Promise<number> {
+    const { _sum } = await this._adMetricDaily.model.adMetricDaily.aggregate({
+      where: { date: { gte: from }, adCampaign: { adAccountId } },
+      _sum: { spend: true },
+    });
+    return _sum.spend || 0;
+  }
+
+  listAccountsWithRules(org: string) {
+    return this._adAccount.model.adAccount.findMany({
+      where: { organizationId: org, deletedAt: null },
+      select: {
+        id: true,
+        provider: true,
+        name: true,
+        currency: true,
+        budgetRule: {
+          select: { monthlyCap: true, approvalThreshold: true, alertAt: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  getRule(adAccountId: string) {
+    return this._adBudgetRule.model.adBudgetRule.findUnique({
+      where: { adAccountId },
+      select: { monthlyCap: true, approvalThreshold: true, alertAt: true, cappedMonth: true },
+    });
+  }
+
+  upsertRule(
+    adAccountId: string,
+    rule: { monthlyCap: number | null; approvalThreshold: number | null; alertAt: number | null }
+  ) {
+    return this._adBudgetRule.model.adBudgetRule.upsert({
+      where: { adAccountId },
+      create: { adAccountId, ...rule },
+      update: rule,
+      select: { id: true },
+    });
+  }
+
+  deleteRule(adAccountId: string) {
+    return this._adBudgetRule.model.adBudgetRule.deleteMany({
+      where: { adAccountId },
+    });
+  }
+
+  rulesToGuard() {
+    return this._adBudgetRule.model.adBudgetRule.findMany({
+      where: {
+        monthlyCap: { not: null },
+        adAccount: { deletedAt: null, refreshNeeded: false },
+      },
+      select: {
+        id: true,
+        monthlyCap: true,
+        alertAt: true,
+        alertedMonth: true,
+        cappedMonth: true,
+        adAccount: { select: SYNC_FIELDS },
+      },
+    });
+  }
+
+  updateRule(id: string, data: { alertedMonth?: string; cappedMonth?: string }) {
+    return this._adBudgetRule.model.adBudgetRule.update({
+      where: { id },
+      data,
+      select: { id: true },
     });
   }
 }
